@@ -1,0 +1,105 @@
+/* ============================================================
+   SUture 暗色主题 —— 阶段 0 基础版
+   色板：背景 #1e1f24 / 面板 #25262c / 边框 #3a3c45
+         文字 #d8dae3 / 弱文字 #8b8e9a / 强调 #4f8cff
+   ============================================================ */
+
+* {
+    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #d8dae3;
+}
+
+QMainWindow, QDialog {
+    background-color: #1e1f24;
+}
+
+/* ---- 中央拖放提示占位（阶段 0）---- */
+QLabel#dropHint {
+    color: #5a5d68;
+    font-size: 16px;
+}
+
+/* ---- 状态栏 ---- */
+QStatusBar {
+    background-color: #1a1b1f;
+    border-top: 1px solid #3a3c45;
+    color: #8b8e9a;
+}
+QStatusBar::item {
+    border: none;
+}
+
+/* ---- 通用控件（为后续阶段预置）---- */
+QPushButton {
+    background-color: #2e3038;
+    border: 1px solid #3a3c45;
+    border-radius: 4px;
+    padding: 5px 16px;
+}
+QPushButton:hover {
+    border-color: #4f8cff;
+}
+QPushButton:pressed {
+    background-color: #25262c;
+}
+QPushButton:disabled {
+    color: #5a5d68;
+    border-color: #2e3038;
+}
+
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #25262c;
+    border: 1px solid #3a3c45;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #4f8cff;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border-color: #4f8cff;
+}
+
+QTableView, QTreeView, QListView {
+    background-color: #25262c;
+    alternate-background-color: #2a2c34;
+    border: 1px solid #3a3c45;
+    gridline-color: #3a3c45;
+    selection-background-color: #3d63b8;
+    selection-color: #ffffff;
+}
+QHeaderView::section {
+    background-color: #2a2c34;
+    border: none;
+    border-right: 1px solid #3a3c45;
+    border-bottom: 1px solid #3a3c45;
+    padding: 6px 8px;
+    color: #8b8e9a;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #3a3c45;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #4a4d58;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    height: 0;
+    width: 0;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #3a3c45;
+    border-radius: 5px;
+    min-width: 30px;
+}
