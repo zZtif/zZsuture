@@ -1,0 +1,25 @@
+# ===== 构建产物 =====
+build/
+out/
+deploy/
+*.suture-tmp
+
+# ===== IDE / 工具链 =====
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.ncb
+*.sdf
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# ===== Claude Code 本地配置 =====
+.claude/
+
+# ===== 系统杂项 =====
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
