@@ -21,7 +21,8 @@ add_library(suture-core STATIC
     src/core/assparse.cpp
     src/core/asswrite.cpp
     src/core/epnum.cpp
-    src/core/load.cpp)
+    src/core/load.cpp
+    src/core/merge.cpp)
 target_include_directories(suture-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(suture-core PUBLIC Qt6::Core)
 
@@ -34,6 +35,12 @@ qt_add_executable(SUture
     src/app/main.cpp
     src/app/mainwindow.cpp
     src/app/mainwindow.hpp
+    src/app/session.cpp
+    src/app/session.hpp
+    src/app/filelistmodel.cpp
+    src/app/filelistmodel.hpp
+    src/app/diagmodel.cpp
+    src/app/diagmodel.hpp
     src/app/resources.qrc)
 target_link_libraries(SUture PRIVATE suture-core Qt6::Widgets)
 

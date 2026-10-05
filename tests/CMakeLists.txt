@@ -10,7 +10,10 @@ suture_add_test(tst_time)        # T4 厘秒时间
 suture_add_test(tst_textdec)     # P1  编码探测
 suture_add_test(tst_ass)         # P2/P3/P4/P5/P9/P10/P11/T2/T5/S5/S6
 suture_add_test(tst_epnum)       # P6/P8 文件名识别 + 装载门面
+suture_add_test(tst_merge)       # 阶段 2：S1-S7/T3/T6 合并引擎
 suture_add_test(tst_roundtrip)   # 阶段 1 验收：六组全量往返
 
 target_compile_definitions(tst_roundtrip PRIVATE
+    SUTURE_TEST_DATA_DIR="${SUTURE_TEST_DATA_DIR}")
+target_compile_definitions(tst_merge PRIVATE
     SUTURE_TEST_DATA_DIR="${SUTURE_TEST_DATA_DIR}")
