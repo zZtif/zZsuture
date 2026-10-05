@@ -12,6 +12,7 @@
 #include "assdoc.hpp"
 #include "load.hpp"
 #include "merge.hpp"
+#include "mpls.hpp"
 
 namespace suture {
 
@@ -22,6 +23,7 @@ public:
         std::shared_ptr<LoadedSubtitle> sub;   // 含稳定 ID/路径/装载诊断
         std::shared_ptr<const AssDocument> doc;
         Cs offset = 0;
+        std::optional<Cs> mplsEnd;             // MPLS 出点（C1 交叉验证用）
         EpisodeInput::OffsetSource source = EpisodeInput::OffsetSource::Prefill;
     };
 
@@ -33,6 +35,14 @@ public:
     void moveRows(int srcRow, int count, int destRow);
     int  count() const { return int(entries_.size()); }
     const Entry& entry(int row) const { return entries_[size_t(row)]; }
+
+    // ---- MPLS（阶段 3，T1/T3）----
+    // 读文件 → 解析 → 映射到每集（D10：短项过滤 + 顺序对齐）。
+    // 生效期间全部行来源切为 MPLS；移除则回落预填。结构性变化会重新映射。
+    bool loadMplsFile(const QString& path, QString* errMsg);
+    void clearMpls();
+    bool hasMpls() const { return mpls_.has_value(); }
+    const MplsInfo* mpls() const { return mpls_ ? &*mpls_ : nullptr; }
 
     // ---- 参数（F03 设定与 F06 微调是同一入口）----
     void setOffset(int row, Cs offset);               // 手改 → 来源变 Manual
@@ -53,6 +63,7 @@ signals:
 
 private:
     void recomputePrefill();   // 只回填"来源=Prefill 且未被手改"的行（§5.9）
+    void applyMplsMapping();   // mpls_ 存在时按 D10 重映射全部行
     void remerge();
 
     QList<Entry> entries_;
@@ -60,6 +71,8 @@ private:
     quint64 nextId_ = 1;
     std::optional<MergeResult> result_;
     QList<Diagnostic> dropDiags_;   // expandDrop 的忽略/去重信息
+    QList<Diagnostic> mplsDiags_;   // MPLS 解析/映射诊断
+    std::optional<MplsInfo> mpls_;
 };
 
 }  // namespace suture

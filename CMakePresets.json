@@ -12,6 +12,16 @@
       }
     },
     {
+      "name": "dev",
+      "displayName": "Ninja MSVC x64 (Debug, stage3 开发隔离)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PREFIX_PATH": "D:/Qt/6.8.3/msvc2022_64"
+      }
+    },
+    {
       "name": "release",
       "displayName": "Ninja MSVC x64 (Release)",
       "generator": "Ninja",
@@ -24,12 +34,18 @@
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
+    { "name": "dev", "configurePreset": "dev" },
     { "name": "release", "configurePreset": "release" }
   ],
   "testPresets": [
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "dev",
+      "configurePreset": "dev",
       "output": { "outputOnFailure": true }
     }
   ]

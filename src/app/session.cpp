@@ -9,6 +9,7 @@
 
 #include "asswrite.hpp"
 #include "epnum.hpp"
+#include "mpls.hpp"
 
 namespace suture {
 
@@ -49,7 +50,11 @@ void Session::addUrls(const QList<QUrl>& urls)
                          return naturalLessThan(QFileInfo(a.sub->path).fileName(),
                                                 QFileInfo(b.sub->path).fileName());
                      });
-    recomputePrefill();
+    // 偏移来源优先级：MPLS 生效则重新映射（集数可能变了），否则预填
+    if (mpls_)
+        applyMplsMapping();
+    else
+        recomputePrefill();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -63,7 +68,10 @@ void Session::removeRows(const QList<int>& rows)
         if (r >= 0 && r < count())
             entries_.erase(entries_.begin() + r);
     }
-    recomputePrefill();
+    if (mpls_)
+        applyMplsMapping();
+    else
+        recomputePrefill();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -84,7 +92,10 @@ void Session::moveRows(int srcRow, int count_, int destRow)
     const int insertAt = (destRow > srcRow) ? destRow - count_ : destRow;
     for (int i = 0; i < count_; ++i)
         entries_.insert(entries_.begin() + insertAt + i, std::move(moved[size_t(i)]));
-    recomputePrefill();
+    if (mpls_)
+        applyMplsMapping();
+    else
+        recomputePrefill();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -123,6 +134,67 @@ void Session::recomputePrefill()
     }
 }
 
+void Session::applyMplsMapping()
+{
+    // MPLS 生效期间全部行来源切换为 MPLS（架构 §5.9：拖入 MPLS 后覆盖预填）。
+    // 数量不匹配时 mapItemsToEpisodes 发告警并保持现有偏移（手动兜底）。
+    mplsDiags_.clear();
+    if (!mpls_)
+        return;
+    std::vector<Diagnostic> diags;
+    const MplsMapping m = mapItemsToEpisodes(*mpls_, count(), diags);
+    for (const Diagnostic& d : diags)
+        mplsDiags_.push_back(d);
+    if (!m.ok)
+        return;
+    for (int i = 0; i < count(); ++i) {
+        Entry& e = entries_[size_t(i)];
+        e.offset = m.offsets[i];
+        e.mplsEnd = m.episodeEnds[i];
+        e.source = EpisodeInput::OffsetSource::Mpls;
+    }
+}
+
+bool Session::loadMplsFile(const QString& path, QString* errMsg)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (errMsg) *errMsg = file.errorString();
+        return false;
+    }
+    const MplsOutcome out = parseMpls(file.readAll());
+    if (!out.info.has_value()) {
+        // 解析失败：降级为诊断（绝不给可疑偏移），保持现有偏移不动
+        mplsDiags_ = QList<Diagnostic>(out.diags.begin(), out.diags.end());
+        emit resultChanged();
+        if (errMsg && !out.diags.empty())
+            *errMsg = out.diags.front().message;
+        return false;
+    }
+    mpls_ = *out.info;
+    mplsDiags_ = QList<Diagnostic>(out.diags.begin(), out.diags.end());
+    applyMplsMapping();
+    remerge();
+    emit structureChanged();
+    emit resultChanged();
+    return true;
+}
+
+void Session::clearMpls()
+{
+    mpls_.reset();
+    mplsDiags_.clear();
+    // 回落预填：全部行回到 Prefill 来源并连锁重算
+    for (Entry& e : entries_) {
+        e.source = EpisodeInput::OffsetSource::Prefill;
+        e.mplsEnd.reset();
+    }
+    recomputePrefill();
+    remerge();
+    emit structureChanged();
+    emit resultChanged();
+}
+
 void Session::remerge()
 {
     if (entries_.isEmpty()) {
@@ -136,6 +208,7 @@ void Session::remerge()
         ep.doc = e.doc;
         ep.offset = e.offset;
         ep.fileId = e.sub->id;
+        ep.mplsEnd = e.mplsEnd;
         ep.offsetSource = e.source;
         eps.push_back(std::move(ep));
     }
@@ -145,6 +218,7 @@ void Session::remerge()
 QList<Diagnostic> Session::allDiags() const
 {
     QList<Diagnostic> out = dropDiags_;
+    out += mplsDiags_;
     // 装载诊断补上文件在列表中的位置（装载时还不知道顺序）
     for (int i = 0; i < count(); ++i) {
         for (const Diagnostic& d : entries_[size_t(i)].sub->loadDiags) {

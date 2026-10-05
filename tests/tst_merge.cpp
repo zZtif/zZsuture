@@ -61,6 +61,10 @@ private slots:
     void markersAndStats();     // 每集标记 + 零时长/Comment 口径
     void outputReparses();      // 合并输出可再解析（端到端）
     void g1EndToEnd();          // 阶段 2 验收：真实 G1 四集全链路（预填偏移）
+    void c1DurationMismatch();  // C1：时长交叉验证（MPLS 出点）
+    void c2BoundaryOverlap();   // C2：跨集边界重叠
+    void c2BoundaryGap();       // C2：异常空档
+    void c2NoFalsePositive();   // C2：预填/双语同刻不误报
 };
 
 void TestMerge::styleIsolation()
@@ -283,6 +287,56 @@ void TestMerge::g1EndToEnd()
     QVERIFY2(ep2Marker, "缺少 EP02 标记");
     QCOMPARE(ep2Marker->start, m2);
     QCOMPARE(r.merged.maxDialogueEnd, offsets[3] + docs[3]->maxDialogueEnd);
+}
+
+void TestMerge::c1DurationMismatch()
+{
+    // C1：字幕平移后结束晚于 MPLS 出点超 5 秒 → 告警；正常容差不报
+    auto d1 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:10.00,0:24:00.00,ED_jap,,0,0,0,,x"));
+    EpisodeInput ep = makeEp(d1, 0, 1);
+    ep.mplsEnd = Cs(23 * 6000);           // 出点早字幕 60 秒 → 报
+    const MergeResult r = merge({ep}, {});
+    QVERIFY(hasCode(r.diags, DiagCode::DurationMismatch));
+
+    EpisodeInput ok = makeEp(d1, 0, 1);
+    ok.mplsEnd = Cs(24 * 6000 - 200);     // 早 2 秒 → 容差内不报
+    const MergeResult r2 = merge({ok}, {});
+    QVERIFY(!hasCode(r2.diags, DiagCode::DurationMismatch));
+}
+
+void TestMerge::c2BoundaryOverlap()
+{
+    // C2：上一集平移后侵入下一集区间 → 告警
+    auto d1 = makeDoc(QStringLiteral("Dialogue: 0,0:00:01.00,0:24:00.00,ED_jap,,0,0,0,,一"));
+    auto d2 = makeDoc(QStringLiteral("Dialogue: 0,0:00:05.00,0:10:00.00,ED_jap,,0,0,0,,二"));
+    // 第 2 集偏移只给 23 分钟 → 第 1 集尾部侵入 1 分钟
+    const MergeResult r = merge({makeEp(d1, 0, 1), makeEp(d2, 23 * 6000, 2)}, {});
+    QVERIFY(hasCode(r.diags, DiagCode::BoundaryOverlap));
+}
+
+void TestMerge::c2BoundaryGap()
+{
+    // C2：集间空档超 2 秒 → Info 提示（无缝连播应为 0）
+    auto d1 = makeDoc(QStringLiteral("Dialogue: 0,0:00:01.00,0:24:00.00,ED_jap,,0,0,0,,一"));
+    auto d2 = makeDoc(QStringLiteral("Dialogue: 0,0:00:05.00,0:10:00.00,ED_jap,,0,0,0,,二"));
+    const MergeResult r = merge({makeEp(d1, 0, 1), makeEp(d2, 25 * 6000, 2)}, {});
+    QVERIFY(hasCode(r.diags, DiagCode::BoundaryGap));
+    QVERIFY(!hasCode(r.diags, DiagCode::BoundaryOverlap));
+}
+
+void TestMerge::c2NoFalsePositive()
+{
+    // 预填偏移（gap 恒 0）+ 集内同刻多行（双语成对/卡拉OK）→ C2 不误报
+    auto d1 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:01.00,0:24:00.00,ED_jap,,0,0,0,,中文\n"
+        "Dialogue: 0,0:00:01.00,0:24:00.00,ED_jap,,0,0,0,,日本語"));
+    auto d2 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:00.00,0:24:00.00,ED_jap,,0,0,0,,二"));
+    const QList<Cs> off = computePrefillOffsets({d1, d2});
+    const MergeResult r = merge({makeEp(d1, off[0], 1), makeEp(d2, off[1], 2)}, {});
+    QVERIFY(!hasCode(r.diags, DiagCode::BoundaryOverlap));
+    QVERIFY(!hasCode(r.diags, DiagCode::BoundaryGap));
 }
 
 QTEST_MAIN(TestMerge)

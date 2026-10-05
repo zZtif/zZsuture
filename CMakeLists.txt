@@ -22,7 +22,9 @@ add_library(suture-core STATIC
     src/core/asswrite.cpp
     src/core/epnum.cpp
     src/core/load.cpp
-    src/core/merge.cpp)
+    src/core/merge.cpp
+    src/core/mpls.cpp
+    src/core/validate.cpp)
 target_include_directories(suture-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(suture-core PUBLIC Qt6::Core)
 
