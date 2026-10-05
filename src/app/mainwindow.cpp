@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
@@ -84,14 +85,64 @@ void MainWindow::buildUi()
     hint->setWordWrap(true);
     pv->addWidget(hint);
 
-    // MPLS 占位（阶段 3 上线，先占住布局位置）
-    auto* mplsBox = new QGroupBox(tr("MPLS 自动偏移（阶段 3）"));
+    // MPLS 面板（阶段 3：原盘播放列表 → 每集起点自动偏移，T1/T3）
+    auto* mplsBox = new QGroupBox(tr("MPLS 自动偏移"));
     auto* mv = new QVBoxLayout(mplsBox);
-    auto* mplsHint = new QLabel(tr("原盘播放列表解析待阶段 3 上线，\n"
-                                   "当前使用预填偏移（上集结束时刻）"));
-    mplsHint->setWordWrap(true);
-    mv->addWidget(mplsHint);
+    auto* mplsPath = new QLineEdit;
+    mplsPath->setPlaceholderText(tr("拖入 .mpls 或点浏览选择"));
+    auto* browseBtn = new QPushButton(tr("浏览…"));
+    auto* pathRow = new QHBoxLayout;
+    pathRow->addWidget(mplsPath, 1);
+    pathRow->addWidget(browseBtn);
+    mv->addLayout(pathRow);
+    auto* parseBtn = new QPushButton(tr("解析并应用"));
+    auto* clearMplsBtn = new QPushButton(tr("清除 MPLS（回落预填）"));
+    auto* btnRow = new QHBoxLayout;
+    btnRow->addWidget(parseBtn);
+    btnRow->addWidget(clearMplsBtn);
+    mv->addLayout(btnRow);
+    auto* mplsInfo = new QLabel(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
+    mplsInfo->setWordWrap(true);
+    mv->addWidget(mplsInfo);
     pv->addWidget(mplsBox);
+
+    const auto applyMplsInfo = [this, mplsInfo] {
+        if (const MplsInfo* m = session_->mpls()) {
+            mplsInfo->setText(tr("已加载：%1 个 PlayItem，总时长 %2")
+                                  .arg(m->items.size())
+                                  .arg(formatCs(m->totalCs)));
+        } else {
+            mplsInfo->setText(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
+        }
+    };
+    connect(session_, &Session::structureChanged, this, applyMplsInfo);
+    connect(browseBtn, &QPushButton::clicked, this, [this, mplsPath] {
+        const QString p = QFileDialog::getOpenFileName(
+            this, tr("选择 MPLS 播放列表"), QString(),
+            tr("Blu-ray 播放列表 (*.mpls);;所有文件 (*)"));
+        if (!p.isEmpty())
+            mplsPath->setText(p);
+    });
+    connect(parseBtn, &QPushButton::clicked, this, [this, mplsPath, applyMplsInfo] {
+        const QString p = mplsPath->text().trimmed();
+        if (p.isEmpty()) {
+            QMessageBox::information(this, tr("SUture"),
+                                     tr("请先选择 .mpls 文件。"));
+            return;
+        }
+        QString err;
+        if (!session_->loadMplsFile(p, &err)) {
+            applyMplsInfo();
+            QMessageBox::warning(this, tr("MPLS 解析失败"),
+                                 err.isEmpty() ? tr("无法读取该文件") : err);
+            return;
+        }
+        applyMplsInfo();
+    });
+    connect(clearMplsBtn, &QPushButton::clicked, this, [this, applyMplsInfo] {
+        session_->clearMpls();
+        applyMplsInfo();
+    });
 
     auto* tuneBox = new QGroupBox(tr("全局微调"));
     auto* tv = new QHBoxLayout(tuneBox);
@@ -173,7 +224,21 @@ void MainWindow::dropEvent(QDropEvent* e)
 {
     if (!e->mimeData()->hasUrls())
         return;
-    session_->addUrls(e->mimeData()->urls());
+    // .mpls 文件单独分流到 MPLS 面板（阶段 3），其余走字幕装载
+    QList<QUrl> subtitleUrls;
+    for (const QUrl& url : e->mimeData()->urls()) {
+        const QString local = url.toLocalFile();
+        if (local.endsWith(QStringLiteral(".mpls"), Qt::CaseInsensitive)) {
+            QString err;
+            if (!session_->loadMplsFile(local, &err))
+                QMessageBox::warning(this, tr("MPLS 解析失败"),
+                                     err.isEmpty() ? tr("无法读取该文件") : err);
+        } else {
+            subtitleUrls.append(url);
+        }
+    }
+    if (!subtitleUrls.isEmpty())
+        session_->addUrls(subtitleUrls);
     e->acceptProposedAction();
 }
 

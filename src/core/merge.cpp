@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <functional>
 
+#include "validate.hpp"
+
 namespace suture {
 namespace {
 
@@ -276,7 +278,10 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
                                 merged.events[size_t(b)].start;
                      });
 
-    // ---------- 6. ScriptInfo 输出条目 ----------
+    // ---------- 6. 校验并入诊断（架构 §5.7 第 7 步：C1/C2） ----------
+    validate(episodes, opt, diags);
+
+    // ---------- 7. ScriptInfo 输出条目 ----------
     auto& entries = merged.info.entries;
     entries.push_back({QStringLiteral("; SUture 合并输出（%1 个文件）")
                            .arg(episodes.size()), QString()});

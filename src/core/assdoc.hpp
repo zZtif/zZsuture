@@ -88,6 +88,7 @@ struct EpisodeInput {
     std::shared_ptr<const AssDocument> doc;  // 共享而非拷贝——重算是常态路径
     Cs      offset = 0;
     quint64 fileId = 0;   // 装载时分配的稳定文件 ID（微调绑定用，与列表位置无关）
+    std::optional<Cs> mplsEnd;   // 该集 MPLS 出点（绝对时刻；C1 交叉验证用）
     enum class OffsetSource { Mpls, Manual, Prefill, Adjusted };
     OffsetSource offsetSource = OffsetSource::Prefill;
 };
