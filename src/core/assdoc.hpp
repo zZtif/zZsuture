@@ -86,7 +86,8 @@ struct LoadedSubtitle {
 // ============ 合并任务参数（阶段 2 使用；F03/F06 统一模型）============
 struct EpisodeInput {
     std::shared_ptr<const AssDocument> doc;  // 共享而非拷贝——重算是常态路径
-    Cs offset = 0;
+    Cs      offset = 0;
+    quint64 fileId = 0;   // 装载时分配的稳定文件 ID（微调绑定用，与列表位置无关）
     enum class OffsetSource { Mpls, Manual, Prefill, Adjusted };
     OffsetSource offsetSource = OffsetSource::Prefill;
 };
