@@ -37,12 +37,15 @@ public:
     const Entry& entry(int row) const { return entries_[size_t(row)]; }
 
     // ---- MPLS（阶段 3，T1/T3）----
-    // 读文件 → 解析 → 映射到每集（D10：短项过滤 + 顺序对齐）。
+    // 读文件 → 解析 → 映射到每集（D10：短项过滤 + 起始正片对齐）。
     // 生效期间全部行来源切为 MPLS；移除则回落预填。结构性变化会重新映射。
     bool loadMplsFile(const QString& path, QString* errMsg);
     void clearMpls();
     bool hasMpls() const { return mpls_.has_value(); }
     const MplsInfo* mpls() const { return mpls_ ? &*mpls_ : nullptr; }
+    int  mplsMainCount() const { return mplsMainCount_; }   // 正片项总数
+    // 字幕第 1 集对应第几个正片（0 基）——整季连播链只合并中间几集的场景
+    void setMplsStartMain(int startMain);
 
     // ---- 参数（F03 设定与 F06 微调是同一入口）----
     void setOffset(int row, Cs offset);               // 手改 → 来源变 Manual
@@ -73,6 +76,8 @@ private:
     QList<Diagnostic> dropDiags_;   // expandDrop 的忽略/去重信息
     QList<Diagnostic> mplsDiags_;   // MPLS 解析/映射诊断
     std::optional<MplsInfo> mpls_;
+    int mplsStartMain_ = 0;         // 字幕第 1 集对应的正片序号（0 基）
+    int mplsMainCount_ = 0;
 };
 
 }  // namespace suture

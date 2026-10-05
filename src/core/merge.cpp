@@ -224,6 +224,8 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
             EventLine marker;
             marker.isComment = true;
             marker.start = marker.end = ep.offset + opt.globalShift;
+            marker.margins[0] = marker.margins[1] = marker.margins[2] =
+                QStringLiteral("0");   // 空值会让 Aegisub 的 lexical_cast 抛异常
             marker.text = QStringLiteral("-- EP%1 starts at %2 (offset %3%4) --")
                 .arg(i + 1, 2, 10, QChar(u'0'))
                 .arg(formatCs(ep.offset))

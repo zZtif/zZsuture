@@ -137,12 +137,14 @@ void Session::recomputePrefill()
 void Session::applyMplsMapping()
 {
     // MPLS 生效期间全部行来源切换为 MPLS（架构 §5.9：拖入 MPLS 后覆盖预填）。
-    // 数量不匹配时 mapItemsToEpisodes 发告警并保持现有偏移（手动兜底）。
+    // 超出正片总数时 mapItemsToEpisodes 发告警并保持现有偏移（手动兜底）。
     mplsDiags_.clear();
+    mplsMainCount_ = 0;
     if (!mpls_)
         return;
     std::vector<Diagnostic> diags;
-    const MplsMapping m = mapItemsToEpisodes(*mpls_, count(), diags);
+    MplsMapping m = mapItemsToEpisodes(*mpls_, count(), mplsStartMain_, diags);
+    mplsMainCount_ = m.mainItems.size();
     for (const Diagnostic& d : diags)
         mplsDiags_.push_back(d);
     if (!m.ok)
@@ -172,6 +174,7 @@ bool Session::loadMplsFile(const QString& path, QString* errMsg)
         return false;
     }
     mpls_ = *out.info;
+    mplsStartMain_ = 0;   // 新文件从第 1 个正片开始
     mplsDiags_ = QList<Diagnostic>(out.diags.begin(), out.diags.end());
     applyMplsMapping();
     remerge();
@@ -184,12 +187,25 @@ void Session::clearMpls()
 {
     mpls_.reset();
     mplsDiags_.clear();
+    mplsMainCount_ = 0;
+    mplsStartMain_ = 0;
     // 回落预填：全部行回到 Prefill 来源并连锁重算
     for (Entry& e : entries_) {
         e.source = EpisodeInput::OffsetSource::Prefill;
         e.mplsEnd.reset();
     }
     recomputePrefill();
+    remerge();
+    emit structureChanged();
+    emit resultChanged();
+}
+
+void Session::setMplsStartMain(int startMain)
+{
+    if (startMain < 0 || startMain == mplsStartMain_ || !mpls_)
+        return;
+    mplsStartMain_ = startMain;
+    applyMplsMapping();
     remerge();
     emit structureChanged();
     emit resultChanged();
