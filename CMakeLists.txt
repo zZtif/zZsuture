@@ -14,9 +14,20 @@ qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 全开
 # 依赖规则（架构 §1.2）：core 只链 QtCore，永不链 Widgets——
 # 违反"逻辑不知道界面存在"在此处即编译失败。
 add_library(suture-core STATIC
-    src/core/version.cpp)
+    src/core/version.cpp
+    src/core/diag.cpp
+    src/core/time.cpp
+    src/core/textdec.cpp
+    src/core/assparse.cpp
+    src/core/asswrite.cpp
+    src/core/epnum.cpp
+    src/core/load.cpp)
 target_include_directories(suture-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(suture-core PUBLIC Qt6::Core)
+
+# 测试样例目录（仓库外 ../测试：六组 24 文件，版权原因不入库）
+set(SUTURE_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../测试"
+    CACHE PATH "SUture 六组字幕样例目录")
 
 # ===== SUture 应用（Qt Widgets）=====
 qt_add_executable(SUture
