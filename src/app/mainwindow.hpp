@@ -11,6 +11,7 @@ namespace suture {
 
 class DiagModel;
 class FileListModel;
+class FileTableView;
 class Session;
 
 class MainWindow : public QMainWindow {
@@ -31,7 +32,7 @@ private:
     Session*      session_;
     FileListModel* fileModel_;
     DiagModel*    diagModel_;
-    QTableView*   fileTable_ = nullptr;
+    FileTableView* fileTable_ = nullptr;
     QTableView*   diagTable_ = nullptr;
     QLabel*       statusLabel_ = nullptr;
 };

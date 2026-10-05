@@ -50,13 +50,18 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(tr("SUture — BDMV 字幕合并"));
+    // 构建标识放标题栏（最显眼处）+ 状态栏右侧——验证问题先核对此处
+    setWindowTitle(tr("SUture — BDMV 字幕合并 ｜ 构建 %1")
+                       .arg(QString::fromLatin1(kBuildStamp)));
     resize(1080, 680);
     setAcceptDrops(true);
 
     // ---- 上半部：文件表 + 右侧控制面板 ----
-    fileTable_ = new QTableView;
+    fileTable_ = new FileTableView;
     fileTable_->setModel(fileModel_);
+    // 行拖拽排序（F02）：视图解码落点 → Session::moveRows
+    connect(fileTable_, &FileTableView::rowsDropped,
+            session_, &Session::moveRows);
     fileTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     fileTable_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     fileTable_->setEditTriggers(QAbstractItemView::DoubleClicked |
@@ -83,6 +88,7 @@ void MainWindow::buildUi()
     pv->setContentsMargins(8, 8, 8, 8);
 
     auto* hint = new QLabel(tr("拖入字幕文件/文件夹到窗口任意位置\n"
+                               "在列表中按住行拖动可排序\n"
                                "双击偏移列可修改每集起点"));
     hint->setWordWrap(true);
     pv->addWidget(hint);
@@ -177,28 +183,6 @@ void MainWindow::buildUi()
     tv->addWidget(shiftSpin);
     pv->addWidget(tuneBox);
 
-    // 上移/下移：拖拽排序的保底操作（拖拽在某些平台/场景不稳定，AGENTS 验证反馈 1）
-    auto* moveRow = new QHBoxLayout;
-    auto* upBtn = new QPushButton(tr("↑ 上移"));
-    auto* downBtn = new QPushButton(tr("↓ 下移"));
-    moveRow->addWidget(upBtn);
-    moveRow->addWidget(downBtn);
-    pv->addLayout(moveRow);
-    const auto selectedRow = [this]() -> int {
-        const auto sel = fileTable_->selectionModel()->selectedRows();
-        return sel.isEmpty() ? -1 : sel.first().row();
-    };
-    connect(upBtn, &QPushButton::clicked, this, [this, selectedRow] {
-        const int r = selectedRow();
-        if (r > 0)
-            session_->moveRows(r, 1, r - 1);       // 当前行插到上一行之前
-    });
-    connect(downBtn, &QPushButton::clicked, this, [this, selectedRow] {
-        const int r = selectedRow();
-        if (r >= 0 && r + 1 < fileModel_->rowCount())
-            session_->moveRows(r, 1, r + 2);       // 当前行插到下一行之后
-    });
-
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
     connect(removeBtn, &QPushButton::clicked, this, [this] {
         QList<int> rows;
@@ -250,7 +234,8 @@ void MainWindow::buildUi()
     setCentralWidget(mainSplit);
 
     statusLabel_ = new QLabel;
-    statusBar()->addWidget(statusLabel_);
+    // 常驻右侧：不被 showMessage 的临时消息（导出成功提示等）覆盖
+    statusBar()->addPermanentWidget(statusLabel_);
     refreshStatus();
 }
 

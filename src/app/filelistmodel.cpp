@@ -1,14 +1,15 @@
 #include "filelistmodel.hpp"
 
+#include <QDataStream>
+#include <QDropEvent>
 #include <QFileInfo>
 #include <QMimeData>
+
+#include <algorithm>
 
 #include "time.hpp"
 
 namespace suture {
-namespace {
-const char* kMimeRows = "application/x-suture-rows";
-}
 
 FileListModel::FileListModel(Session* session, QObject* parent)
     : QAbstractTableModel(parent), s_(session)
@@ -106,11 +107,11 @@ QVariant FileListModel::headerData(int sec, Qt::Orientation o, int role) const
     return {};
 }
 
-// ---- 拖拽排序：编码行号 → Session::moveRows ----
+// ---- 拖拽排序：模型编码行号；落点由 FileTableView::dropEvent 决定 ----
 
 QStringList FileListModel::mimeTypes() const
 {
-    return {QString::fromLatin1(kMimeRows), QStringLiteral("text/plain")};
+    return {QString::fromLatin1(kRowMime)};
 }
 
 QMimeData* FileListModel::mimeData(const QModelIndexList& lists) const
@@ -124,31 +125,14 @@ QMimeData* FileListModel::mimeData(const QModelIndexList& lists) const
     QDataStream ds(&bytes, QIODevice::WriteOnly);
     ds << rows;
     auto* m = new QMimeData;
-    m->setData(QString::fromLatin1(kMimeRows), bytes);
+    m->setData(QString::fromLatin1(kRowMime), bytes);
     return m;
 }
 
 bool FileListModel::canDropMimeData(const QMimeData* data, Qt::DropAction,
                                     int, int, const QModelIndex& parent) const
 {
-    return data->hasFormat(QString::fromLatin1(kMimeRows)) && !parent.isValid();
-}
-
-bool FileListModel::dropMimeData(const QMimeData* data, Qt::DropAction action,
-                                 int row, int, const QModelIndex& parent)
-{
-    if (action == Qt::IgnoreAction || !canDropMimeData(data, action, row, 0, parent))
-        return false;
-    if (row < 0 || row > s_->count())
-        row = s_->count();
-    QByteArray bytes = data->data(QString::fromLatin1(kMimeRows));
-    QDataStream ds(&bytes, QIODevice::ReadOnly);
-    QList<int> rows;
-    ds >> rows;
-    if (rows.isEmpty())
-        return false;
-    s_->moveRows(rows.first(), rows.size(), row);
-    return true;
+    return data->hasFormat(QString::fromLatin1(kRowMime)) && !parent.isValid();
 }
 
 Qt::DropActions FileListModel::supportedDropActions() const
@@ -158,9 +142,33 @@ Qt::DropActions FileListModel::supportedDropActions() const
 
 Qt::DropActions FileListModel::supportedDragActions() const
 {
-    // 不覆写此项时基类返回 CopyAction，InternalMove 拖拽会静默失效
-    // （AGENTS 验证反馈 1：拖动行无任何可见变化）
+    // 不覆写此项时基类返回 CopyAction，拖拽会静默失效（验证反馈实锤）
     return Qt::MoveAction;
+}
+
+// ---- FileTableView：确定性拖放 ----
+// 完全接管 dropEvent，不走 QAbstractItemView 默认 InternalMove 路径
+// （默认路径在成功后会对源行调 clearOrRemove，与我们的 moveRows 语义冲突）。
+void FileTableView::dropEvent(QDropEvent* e)
+{
+    if (e->source() != this || !e->mimeData()->hasFormat(QString::fromLatin1(kRowMime))) {
+        QTableView::dropEvent(e);   // 非本表行拖拽（理论上不会发生）
+        return;
+    }
+    // 落点行：鼠标所在行；指示器在其下半部 → 插到该行之后；空白区 → 追加
+    const QModelIndex idx = indexAt(e->position().toPoint());
+    int row = idx.isValid() ? idx.row() : model()->rowCount();
+    if (idx.isValid() && dropIndicatorPosition() == QAbstractItemView::BelowItem)
+        ++row;
+
+    QByteArray bytes = e->mimeData()->data(QString::fromLatin1(kRowMime));
+    QDataStream ds(&bytes, QIODevice::ReadOnly);
+    QList<int> rows;
+    ds >> rows;
+    if (rows.isEmpty())
+        return;
+    e->acceptProposedAction();
+    emit rowsDropped(rows.first(), rows.size(), row);
 }
 
 }  // namespace suture
