@@ -10,6 +10,26 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Test)
 
 qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 全开
 
+# ===== 构建标识：每次构建刷新（git 短哈希 + 时间），显示在状态栏 =====
+# 验证问题先核对状态栏构建标识，杜绝"跑的是旧 exe"的歧义
+find_package(Git QUIET)
+set(SUTURE_GIT_SHORT "nogit")
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE SUTURE_GIT_SHORT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+string(TIMESTAMP SUTURE_BUILD_TIME "%Y-%m-%d %H:%M:%S")
+set(SUTURE_BUILDINFO_SRC ${CMAKE_CURRENT_BINARY_DIR}/generated/buildinfo.cpp)
+add_custom_target(gen_buildinfo ALL
+    BYPRODUCTS ${SUTURE_BUILDINFO_SRC}
+    COMMAND ${CMAKE_COMMAND}
+            -DOUT=${SUTURE_BUILDINFO_SRC}
+            -DSTAMP=${SUTURE_GIT_SHORT}+${SUTURE_BUILD_TIME}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteBuildInfo.cmake
+    COMMENT "生成构建标识")
+
 # ===== suture-core：领域逻辑静态库 =====
 # 依赖规则（架构 §1.2）：core 只链 QtCore，永不链 Widgets——
 # 违反"逻辑不知道界面存在"在此处即编译失败。
@@ -24,7 +44,9 @@ add_library(suture-core STATIC
     src/core/load.cpp
     src/core/merge.cpp
     src/core/mpls.cpp
-    src/core/validate.cpp)
+    src/core/validate.cpp
+    ${SUTURE_BUILDINFO_SRC})
+add_dependencies(suture-core gen_buildinfo)
 target_include_directories(suture-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(suture-core PUBLIC Qt6::Core)
 

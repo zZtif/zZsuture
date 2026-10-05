@@ -20,6 +20,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "buildinfo.hpp"
 #include "diagmodel.hpp"
 #include "filelistmodel.hpp"
 #include "session.hpp"
@@ -330,8 +331,9 @@ void MainWindow::refreshStatus()
         }
     }
     statusLabel_->setText(
-        tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4")
-            .arg(session_->count()).arg(err).arg(warn).arg(info));
+        tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4  ｜ 构建 %5")
+            .arg(session_->count()).arg(err).arg(warn).arg(info)
+            .arg(QString::fromLatin1(kBuildStamp)));
 }
 
 }  // namespace suture
