@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTableView>
@@ -101,20 +102,36 @@ void MainWindow::buildUi()
     btnRow->addWidget(parseBtn);
     btnRow->addWidget(clearMplsBtn);
     mv->addLayout(btnRow);
+    // 起始正片选择（整季连播链只合并中间几集的场景，实证：GTO 44 集链）
+    auto* startRow = new QHBoxLayout;
+    auto* startSpin = new QSpinBox;
+    startSpin->setRange(1, 1);
+    startSpin->setSuffix(tr(" / 正片数"));
+    startRow->addWidget(new QLabel(tr("字幕第1集对应第")));
+    startRow->addWidget(startSpin);
+    startRow->addWidget(new QLabel(tr("个正片")));
+    mv->addLayout(startRow);
     auto* mplsInfo = new QLabel(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
     mplsInfo->setWordWrap(true);
     mv->addWidget(mplsInfo);
     pv->addWidget(mplsBox);
 
-    const auto applyMplsInfo = [this, mplsInfo] {
+    const auto applyMplsInfo = [this, mplsInfo, startSpin] {
         if (const MplsInfo* m = session_->mpls()) {
             mplsInfo->setText(tr("已加载：%1 个 PlayItem，总时长 %2")
                                   .arg(m->items.size())
                                   .arg(formatCs(m->totalCs)));
+            startSpin->setRange(1, qMax(1, session_->mplsMainCount()));
+            startSpin->setEnabled(session_->mplsMainCount() > 0);
         } else {
             mplsInfo->setText(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
+            startSpin->setRange(1, 1);
+            startSpin->setEnabled(false);
         }
     };
+    connect(startSpin, &QSpinBox::valueChanged, this, [this](int v) {
+        session_->setMplsStartMain(v - 1);   // UI 1 基 → 内部 0 基
+    });
     connect(session_, &Session::structureChanged, this, applyMplsInfo);
     connect(browseBtn, &QPushButton::clicked, this, [this, mplsPath] {
         const QString p = QFileDialog::getOpenFileName(
@@ -158,6 +175,28 @@ void MainWindow::buildUi()
     tv->addWidget(new QLabel(tr("所有字幕")));
     tv->addWidget(shiftSpin);
     pv->addWidget(tuneBox);
+
+    // 上移/下移：拖拽排序的保底操作（拖拽在某些平台/场景不稳定，AGENTS 验证反馈 1）
+    auto* moveRow = new QHBoxLayout;
+    auto* upBtn = new QPushButton(tr("↑ 上移"));
+    auto* downBtn = new QPushButton(tr("↓ 下移"));
+    moveRow->addWidget(upBtn);
+    moveRow->addWidget(downBtn);
+    pv->addLayout(moveRow);
+    const auto selectedRow = [this]() -> int {
+        const auto sel = fileTable_->selectionModel()->selectedRows();
+        return sel.isEmpty() ? -1 : sel.first().row();
+    };
+    connect(upBtn, &QPushButton::clicked, this, [this, selectedRow] {
+        const int r = selectedRow();
+        if (r > 0)
+            session_->moveRows(r, 1, r - 1);       // 当前行插到上一行之前
+    });
+    connect(downBtn, &QPushButton::clicked, this, [this, selectedRow] {
+        const int r = selectedRow();
+        if (r >= 0 && r + 1 < fileModel_->rowCount())
+            session_->moveRows(r, 1, r + 2);       // 当前行插到下一行之后
+    });
 
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
     connect(removeBtn, &QPushButton::clicked, this, [this] {

@@ -156,4 +156,11 @@ Qt::DropActions FileListModel::supportedDropActions() const
     return Qt::MoveAction;
 }
 
+Qt::DropActions FileListModel::supportedDragActions() const
+{
+    // 不覆写此项时基类返回 CopyAction，InternalMove 拖拽会静默失效
+    // （AGENTS 验证反馈 1：拖动行无任何可见变化）
+    return Qt::MoveAction;
+}
+
 }  // namespace suture

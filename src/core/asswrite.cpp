@@ -12,6 +12,14 @@ QString sanitizeField(QString s)
     return s;
 }
 
+// Margin 字段规范化（P2）：空值输出为 "0"——Aegisub 对该字段做
+// lexical_cast<int>，空串会直接抛 "bad lexical cast" 拒开整个文件
+// （阶段 2 人工验证发现的实锤 bug）
+QString marginField(const QString& m)
+{
+    return m.isEmpty() ? QStringLiteral("0") : m;
+}
+
 }  // namespace
 
 QByteArray serializeAss(const AssDocument& doc)
@@ -69,7 +77,9 @@ QByteArray serializeAss(const AssDocument& doc)
              + formatCs(ev.end) + u','
              + sanitizeField(ev.style) + u','
              + sanitizeField(ev.actor) + u','
-             + ev.margins[0] + u',' + ev.margins[1] + u',' + ev.margins[2] + u','
+             + marginField(ev.margins[0]) + u','
+             + marginField(ev.margins[1]) + u','
+             + marginField(ev.margins[2]) + u','
              + sanitizeField(ev.effect) + u','
              + ev.text                          // 一字不动（S5）
              + u'\n';

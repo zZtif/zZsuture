@@ -213,6 +213,17 @@ void TestAss::quirks()
     QVERIFY(p.ok);
     QCOMPARE(*p.doc.info.value(QStringLiteral("Title")), QStringLiteral("xxx"));
     QCOMPARE(p.doc.events[0].margins[0], QStringLiteral("0000"));  // 原样
+
+    // 空 Margin 规范化为 "0"（Aegisub lexical_cast<int>("") 会拒开整文件——
+    // 阶段 2 人工验证实锤的 bug，修复回归用例）
+    const QString text2 = QStringLiteral(
+        "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,,,,,x");
+    const ParseOutcome p2 = parseAss(text2);
+    QVERIFY(p2.ok);
+    const QByteArray out = serializeAss(p2.doc);
+    const QString line = QString::fromUtf8(out);
+    // 空 actor/margins/effect → actor 仍为空（字符串字段合法），margins 补 "0"
+    QVERIFY(line.contains(QStringLiteral(",Default,,0,0,0,,x")));
 }
 
 void TestAss::roundTripSemantic()

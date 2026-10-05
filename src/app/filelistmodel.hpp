@@ -31,6 +31,7 @@ public:
     bool dropMimeData(const QMimeData* data, Qt::DropAction action,
                       int row, int col, const QModelIndex& parent) override;
     Qt::DropActions supportedDropActions() const override;
+    Qt::DropActions supportedDragActions() const override;
 
 private:
     Session* s_;

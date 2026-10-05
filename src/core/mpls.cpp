@@ -90,12 +90,15 @@ MplsOutcome parseMpls(const QByteArray& raw)
         return out;
     }
 
-    // ---- 逐 PlayItem：IN/OUT（45kHz），靠项长字段跳到下一项 ----
+    // ---- 逐 PlayItem：IN/OUT（45kHz），靠 u16 项长跳到下一项 ----
+    // 项内布局（实证）：+0 u16 项长，+2 clip[5]，+7 "M2TS"[4]，+11 连接信息[3]，
+    // +14 IN[u32]，+18 OUT[u32]，其后 UO 表/STN 表/多角度数据由项长整体覆盖
+    const qsizetype sectionEnd = pl + 4 + qsizetype(plLen);
     qsizetype off = pl + 10;
     for (quint16 i = 0; i < nItems; ++i) {
-        quint32 itemLen = 0;
-        if (!readU32(raw, off, &itemLen) || itemLen < 25 ||
-            off + 4 + qsizetype(itemLen) > raw.size()) {
+        quint16 itemLen = 0;
+        if (off + 22 > raw.size() || !readU16(raw, off, &itemLen) ||
+            itemLen < 20 || off + 2 + qsizetype(itemLen) > sectionEnd) {
             out.diags.push_back(Diagnostic::make(
                 DiagLevel::Error, DiagCode::MplsUnsupported,
                 QStringLiteral("第 %1 个 PlayItem 长度非法（%2），停止解析")
@@ -103,8 +106,8 @@ MplsOutcome parseMpls(const QByteArray& raw)
             return out;
         }
         PlayItemSpan span;
-        if (!readU32(raw, off + 17, &span.in45k) ||
-            !readU32(raw, off + 21, &span.out45k) || span.out45k < span.in45k) {
+        if (!readU32(raw, off + 14, &span.in45k) ||
+            !readU32(raw, off + 18, &span.out45k) || span.out45k < span.in45k) {
             out.diags.push_back(Diagnostic::make(
                 DiagLevel::Error, DiagCode::MplsUnsupported,
                 QStringLiteral("第 %1 个 PlayItem 的 IN/OUT 时间非法")
@@ -114,7 +117,7 @@ MplsOutcome parseMpls(const QByteArray& raw)
         span.durationCs = ticks45kToCs(span.out45k - span.in45k);
         info.totalCs += span.durationCs;
         info.items.append(span);
-        off += 4 + itemLen;   // 多角度等附加数据整体跳过
+        off += 2 + itemLen;   // UO/STN/多角度等附加数据整体跳过
     }
 
     if (nSubPaths > 0)
@@ -129,35 +132,40 @@ MplsOutcome parseMpls(const QByteArray& raw)
 }
 
 MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
-                               std::vector<Diagnostic>& diags)
+                               int startMain, std::vector<Diagnostic>& diags)
 {
     MplsMapping m;
-    if (episodeCount <= 0)
+    if (episodeCount <= 0 || startMain < 0)
         return m;
 
     // 短项（Logo/菜单）与正片分离
-    QList<int> mainItems;
     for (int i = 0; i < info.items.size(); ++i)
         if (info.items[i].durationCs >= kMainItemMinCs)
-            mainItems.append(i);
+            m.mainItems.append(i);
 
-    if (mainItems.size() != episodeCount) {
-        // 数量不等 → 不猜。列出 PlayItem 时长供用户手动对齐（偏移列可编辑）
+    if (startMain + episodeCount > m.mainItems.size()) {
+        // 超出正片总数 → 不猜。列出前若干项时长供用户对齐（超长列表截断）
         QString durations;
-        for (int i = 0; i < info.items.size(); ++i) {
+        const int shown = qMin(info.items.size(), 8);
+        for (int i = 0; i < shown; ++i) {
             if (i > 0) durations += u'、';
             durations += formatCs(info.items[i].durationCs);
         }
+        if (info.items.size() > shown)
+            durations += QStringLiteral("…（共 %1 项）").arg(info.items.size());
         diags.push_back(Diagnostic::make(
             DiagLevel::Warning, DiagCode::MplsUnsupported,
-            QStringLiteral("MPLS 有 %1 个正片长度的 PlayItem，与字幕文件数"
-                           "（%2）不符，无法自动映射——请在偏移列手动设定"
-                           "（各 PlayItem 时长：%3）")
-                .arg(mainItems.size()).arg(episodeCount).arg(durations)));
+            QStringLiteral("起始正片 #%1 起只有 %2 个正片 PlayItem，少于字幕"
+                           "文件数（%3）——请调低起始集或减少文件，或在偏移列"
+                           "手动设定（前 %4 项时长：%5）")
+                .arg(startMain + 1)
+                .arg(m.mainItems.size() - startMain)
+                .arg(episodeCount).arg(shown).arg(durations)));
+        m.mainItems.clear();
         return m;
     }
 
-    // 顺序对齐：每集起点 = 其前所有 item（含 Logo）的累计时长
+    // 每集起点 = 从链首到该集正片项的累计时长（含 Logo 与被跳过的前序正片）
     m.ok = true;
     m.offsets.reserve(episodeCount);
     m.episodeEnds.reserve(episodeCount);
@@ -165,13 +173,19 @@ MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
     int ep = 0;
     for (int i = 0; i < info.items.size(); ++i) {
         const Cs dur = info.items[i].durationCs;
-        if (mainItems.contains(i)) {
+        if (ep < episodeCount && m.mainItems[startMain + ep] == i) {
             m.offsets.append(running);
             m.episodeEnds.append(running + dur);
             ++ep;
         }
-        running += dur;   // Logo 时长计入下一集起点
+        running += dur;
     }
+    if (startMain > 0)
+        diags.push_back(Diagnostic::make(
+            DiagLevel::Info, DiagCode::MplsUnsupported,
+            QStringLiteral("字幕第 1 集对应该链的第 %1 个正片，起点偏移已含"
+                           "其前全部内容（%2）")
+                .arg(startMain + 1).arg(formatCs(m.offsets.value(0)))));
     return m;
 }
 
