@@ -1,7 +1,8 @@
 // filelistmodel.hpp —— 文件列表表模型 + 拖放表格视图（架构 §5.9）
 // 列：# / 文件名 / 集数 / 最晚End / 偏移(秒) / 来源；偏移列可编辑（F03=F06）。
-// 行拖拽排序（F02）：视图完全接管 dropEvent（绕开 Qt InternalMove 的
-// 隐藏行为——clearOrRemove 会在拖放后删源行等），行为确定可控。
+// 行拖拽排序（F02）：纯鼠标事件实现（按下→移动超阈值→松开），不依赖
+// Qt 的 DnD/InternalMove 机制——三次实测其行为不可控（clearOrRemove、
+// 静默失效等），改为自绘插入指示线 + rowsDropped 信号，可用 QTest 模拟验证。
 #pragma once
 
 #include <QAbstractTableModel>
@@ -10,9 +11,6 @@
 #include "session.hpp"
 
 namespace suture {
-
-// 行拖拽的 mime 类型（模型编码 / 视图解码共用）
-inline constexpr char kRowMime[] = "application/x-suture-rows";
 
 class FileListModel : public QAbstractTableModel {
     Q_OBJECT
@@ -28,19 +26,11 @@ public:
     Qt::ItemFlags flags(const QModelIndex& idx) const override;
     QVariant headerData(int sec, Qt::Orientation o, int role) const override;
 
-    // 拖拽：模型负责编码行号（mimeData）与格式应答；落点处理在 FileTableView
-    QStringList mimeTypes() const override;
-    QMimeData* mimeData(const QModelIndexList& lists) const override;
-    bool canDropMimeData(const QMimeData* data, Qt::DropAction action,
-                         int row, int col, const QModelIndex& parent) const override;
-    Qt::DropActions supportedDropActions() const override;
-    Qt::DropActions supportedDragActions() const override;
-
 private:
     Session* s_;
 };
 
-// 确定性拖放表格：dropEvent 自行解码行号并上报，不依赖 Qt 的 InternalMove
+// 鼠标拖拽排序表格：按住行 → 移动 → 目标位置松开；拖动中自绘插入指示线
 class FileTableView : public QTableView {
     Q_OBJECT
 public:
@@ -51,7 +41,19 @@ signals:
     void rowsDropped(int srcRow, int count, int destRow);
 
 protected:
-    void dropEvent(QDropEvent* e) override;
+    void mousePressEvent(QMouseEvent* e) override;
+    void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
+    void paintEvent(QPaintEvent* e) override;
+
+private:
+    int insertRowAt(const QPoint& pos) const;   // 光标处的插入行号
+
+    bool   dragArmed_ = false;   // 左键按在有效行上（等待移动超阈值）
+    bool   dragging_ = false;    // 拖拽中
+    int    pressRow_ = -1;
+    QPoint pressPos_;
+    int    hoverRow_ = -1;       // 拖动中的插入目标（画指示线用）
 };
 
 }  // namespace suture

@@ -59,7 +59,7 @@ void MainWindow::buildUi()
     // ---- 上半部：文件表 + 右侧控制面板 ----
     fileTable_ = new FileTableView;
     fileTable_->setModel(fileModel_);
-    // 行拖拽排序（F02）：视图解码落点 → Session::moveRows
+    // 行拖拽排序（F02）：视图纯鼠标实现 → Session::moveRows
     connect(fileTable_, &FileTableView::rowsDropped,
             session_, &Session::moveRows);
     fileTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -67,11 +67,6 @@ void MainWindow::buildUi()
     fileTable_->setEditTriggers(QAbstractItemView::DoubleClicked |
                                 QAbstractItemView::SelectedClicked |
                                 QAbstractItemView::EditKeyPressed);
-    fileTable_->setDragEnabled(true);
-    fileTable_->setAcceptDrops(true);
-    fileTable_->setDragDropMode(QAbstractItemView::InternalMove);
-    fileTable_->setDefaultDropAction(Qt::MoveAction);
-    fileTable_->setDropIndicatorShown(true);
     fileTable_->verticalHeader()->hide();
     fileTable_->horizontalHeader()->setStretchLastSection(false);
     fileTable_->horizontalHeader()->setSectionResizeMode(FileListModel::ColName,

@@ -1,9 +1,9 @@
 #include "filelistmodel.hpp"
 
-#include <QDataStream>
-#include <QDropEvent>
+#include <QApplication>
 #include <QFileInfo>
-#include <QMimeData>
+#include <QMouseEvent>
+#include <QPainter>
 
 #include <algorithm>
 
@@ -107,68 +107,78 @@ QVariant FileListModel::headerData(int sec, Qt::Orientation o, int role) const
     return {};
 }
 
-// ---- 拖拽排序：模型编码行号；落点由 FileTableView::dropEvent 决定 ----
-
-QStringList FileListModel::mimeTypes() const
+// ---- FileTableView：鼠标拖拽排序 ----
+// 纯鼠标事件实现：左键按在行上 → 移动超过 startDragDistance → 拖拽态；
+// 移动中画插入指示线；松开时目标 ≠ 原位置 → rowsDropped → Session::moveRows。
+// 不调用基类的拖放路径（QTableView::mouseMoveEvent 会触发橡皮筋选择，拖拽中跳过）。
+void FileTableView::mousePressEvent(QMouseEvent* e)
 {
-    return {QString::fromLatin1(kRowMime)};
+    if (e->button() == Qt::LeftButton) {
+        pressPos_ = e->pos();
+        pressRow_ = rowAt(pressPos_.y());
+        dragArmed_ = pressRow_ >= 0;
+    }
+    QTableView::mousePressEvent(e);   // 选择等正常行为保留
 }
 
-QMimeData* FileListModel::mimeData(const QModelIndexList& lists) const
+void FileTableView::mouseMoveEvent(QMouseEvent* e)
 {
-    QList<int> rows;
-    for (const QModelIndex& i : lists)
-        if (!rows.contains(i.row()))
-            rows.append(i.row());
-    std::sort(rows.begin(), rows.end());
-    QByteArray bytes;
-    QDataStream ds(&bytes, QIODevice::WriteOnly);
-    ds << rows;
-    auto* m = new QMimeData;
-    m->setData(QString::fromLatin1(kRowMime), bytes);
-    return m;
+    if (e->buttons() & Qt::LeftButton) {
+        if (dragArmed_ && !dragging_ &&
+            (e->pos() - pressPos_).manhattanLength() >=
+                QApplication::startDragDistance()) {
+            dragging_ = true;
+            viewport()->setCursor(Qt::ClosedHandCursor);
+        }
+        if (dragging_) {
+            hoverRow_ = insertRowAt(e->pos());
+            viewport()->update();
+            return;   // 拖动中不走基类
+        }
+    }
+    QTableView::mouseMoveEvent(e);
 }
 
-bool FileListModel::canDropMimeData(const QMimeData* data, Qt::DropAction,
-                                    int, int, const QModelIndex& parent) const
+void FileTableView::mouseReleaseEvent(QMouseEvent* e)
 {
-    return data->hasFormat(QString::fromLatin1(kRowMime)) && !parent.isValid();
-}
-
-Qt::DropActions FileListModel::supportedDropActions() const
-{
-    return Qt::MoveAction;
-}
-
-Qt::DropActions FileListModel::supportedDragActions() const
-{
-    // 不覆写此项时基类返回 CopyAction，拖拽会静默失效（验证反馈实锤）
-    return Qt::MoveAction;
-}
-
-// ---- FileTableView：确定性拖放 ----
-// 完全接管 dropEvent，不走 QAbstractItemView 默认 InternalMove 路径
-// （默认路径在成功后会对源行调 clearOrRemove，与我们的 moveRows 语义冲突）。
-void FileTableView::dropEvent(QDropEvent* e)
-{
-    if (e->source() != this || !e->mimeData()->hasFormat(QString::fromLatin1(kRowMime))) {
-        QTableView::dropEvent(e);   // 非本表行拖拽（理论上不会发生）
+    if (dragging_ && e->button() == Qt::LeftButton) {
+        const int target = insertRowAt(e->pos());
+        viewport()->unsetCursor();
+        dragging_ = false;
+        hoverRow_ = -1;
+        viewport()->update();
+        dragArmed_ = false;
+        // 目标 == 自身或自身后一行 = 原地放下，无操作
+        if (pressRow_ >= 0 && target != pressRow_ && target != pressRow_ + 1)
+            emit rowsDropped(pressRow_, 1, target);
+        pressRow_ = -1;
         return;
     }
-    // 落点行：鼠标所在行；指示器在其下半部 → 插到该行之后；空白区 → 追加
-    const QModelIndex idx = indexAt(e->position().toPoint());
-    int row = idx.isValid() ? idx.row() : model()->rowCount();
-    if (idx.isValid() && dropIndicatorPosition() == QAbstractItemView::BelowItem)
-        ++row;
+    dragArmed_ = false;
+    QTableView::mouseReleaseEvent(e);
+}
 
-    QByteArray bytes = e->mimeData()->data(QString::fromLatin1(kRowMime));
-    QDataStream ds(&bytes, QIODevice::ReadOnly);
-    QList<int> rows;
-    ds >> rows;
-    if (rows.isEmpty())
+int FileTableView::insertRowAt(const QPoint& pos) const
+{
+    const int r = rowAt(pos.y());
+    if (r < 0)
+        return model() ? model()->rowCount() : 0;
+    // 光标在行下半部 → 插到该行之后
+    return pos.y() > visualRect(model()->index(r, 0)).center().y() ? r + 1 : r;
+}
+
+void FileTableView::paintEvent(QPaintEvent* e)
+{
+    QTableView::paintEvent(e);
+    if (!dragging_ || hoverRow_ < 0 || !model() || model()->rowCount() == 0)
         return;
-    e->acceptProposedAction();
-    emit rowsDropped(rows.first(), rows.size(), row);
+    QPainter p(viewport());
+    p.setPen(QPen(QColor(0x4F, 0x8C, 0xFF), 3));
+    const int rows = model()->rowCount();
+    const int y = (hoverRow_ >= rows)
+        ? visualRect(model()->index(rows - 1, 0)).bottom()   // 追加到末尾
+        : visualRect(model()->index(hoverRow_, 0)).top();
+    p.drawLine(0, y, viewport()->width(), y);
 }
 
 }  // namespace suture
