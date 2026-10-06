@@ -14,6 +14,15 @@ suture_add_test(tst_merge)       # 阶段 2/3：S1-S7/T3/T6/C1/C2 合并引擎+�
 suture_add_test(tst_mpls)        # 阶段 3：T1/T3/D10 MPLS 解析与映射
 suture_add_test(tst_roundtrip)   # 阶段 1 验收：六组全量往返
 
+# 拖拽排序（GUI 层）：模拟鼠标按下/移动/松开。需要 app 层源码 + Widgets
+add_executable(tst_drag tst_drag.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/filelistmodel.cpp)
+target_include_directories(tst_drag PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app)
+target_link_libraries(tst_drag PRIVATE suture-core Qt6::Test Qt6::Widgets)
+add_test(NAME tst_drag COMMAND tst_drag)
+
 target_compile_definitions(tst_roundtrip PRIVATE
     SUTURE_TEST_DATA_DIR="${SUTURE_TEST_DATA_DIR}")
 target_compile_definitions(tst_merge PRIVATE
