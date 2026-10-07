@@ -69,4 +69,27 @@ struct MplsMapping {
 MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
                                int startMain, std::vector<Diagnostic>& diags);
 
+// ---- T8/T10：章节分集建议（v1.4 场景：多集一个 m2ts，直接开文件播放）----
+// 适用前提：恰一个正片 PlayItem（多集装在一个 m2ts，黑契/死后文型）且其
+// Entry Mark 章节非空。多个正片项（一集一项的规整盘 / GTO 长链）返回
+// ok=false，调用方回落 PlayItem 映射。
+struct ChapterMapping {
+    bool ok = false;
+    QString clip;               // 多集 m2ts 的 clip 名（F07 同名导出用）
+    QList<Cs> offsets;          // 每集建议起点（m2ts 文件内相对位置，第 1 集通常 0）
+    QList<Cs> episodeEnds;      // 建议集界 = 下一集起点（末集 = 项时长），C1 用
+};
+
+// 算法（黑契 36 章/死后文 29 章双盘数据标定，tools/scan_disc.py 取证）：
+//   候选 = 该项章节的文件内相对时刻，剔除"成对章节"的第二个——前一个章节
+//   恰在 87~93 秒前的是 OP/ED 对的结束点，两盘实证从不为分集点；
+//   目标位 = 项时长等分（k*dur/N）；
+//   评分 = |候选−目标| − 签名奖励（其后 87~93 秒内有另一章节 = OP 结束
+//   签名，两盘分集点普遍携带；死后文等间距启发式实证会错，签名是纠偏项）；
+//   带集间距约束（10~60 分钟）的单调 DP 取总代价最小序列。
+// 吸附距离超容差的集回落等分值并告警——一切建议以人工核对为准（T8 冻结
+// 方案：自动只做建议，不做定案）。
+ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
+                                    std::vector<Diagnostic>& diags);
+
 }  // namespace suture

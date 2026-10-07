@@ -87,6 +87,41 @@ QByteArray buildMpls(const QList<ItemSpec>& items, const QList<MarkSpec>& marks 
 
 // 厘秒 → 45kHz tick（1 cs = 450 tick）
 constexpr quint32 ticks(Cs cs) { return quint32(cs * 450); }
+
+// ---- 章节建议测试的数据构造（不经二进制，直接组 MplsInfo）----
+// 时间轴原点取 10:00（实证各盘统一原点偏移，建议值靠相减抵消）
+MplsInfo makeChapterInfo(const QList<Cs>& markRelsCs, Cs itemDurCs,
+                         int extraMainItems = 0)
+{
+    MplsInfo info;
+    const quint32 origin = 600 * 100 * 450;
+    {
+        PlayItemSpan main;
+        main.clip = QStringLiteral("00001");
+        main.in45k = origin;
+        main.out45k = origin + ticks(itemDurCs);
+        main.durationCs = itemDurCs;
+        info.items.append(main);
+        info.totalCs = itemDurCs;
+    }
+    for (int i = 0; i < extraMainItems; ++i) {
+        PlayItemSpan extra;   // 一集一项的规整盘：额外正片项 → 章节模式不适用
+        extra.clip = QStringLiteral("%1").arg(i + 2, 5, 10, QChar(u'0'));
+        extra.in45k = origin;
+        extra.out45k = origin + ticks(24 * 6000);
+        extra.durationCs = 24 * 6000;
+        info.items.append(extra);
+        info.totalCs += extra.durationCs;
+    }
+    for (Cs r : markRelsCs) {
+        PlayListMark mk;
+        mk.type = 1;
+        mk.itemIndex = 0;
+        mk.time45k = origin + ticks(r);
+        info.marks.append(mk);
+    }
+    return info;
+}
 }  // namespace
 
 class TestMpls : public QObject {
@@ -102,6 +137,11 @@ private slots:
     void unknownVersion();      // 未知版本 → Info + 仍解析
     void marksAndClips();       // T8：章节 + clip 名解析
     void marksDegrade();        // T8：章节段截断 → 告警降级，PlayItem 保留
+    void chapterDtB();          // T8：黑契型 36 章 / 6 集 → 建议全对
+    void chapterShigofumi();    // T8：死后文型 29 章间距不均 / 5 集 → 签名纠偏
+    void chapterInapplicable(); // T8：多正片项 / 无章节 → 不适用，回落 PlayItem
+    void chapterEquidivide();   // T8：候选不足 → 等分预填 + 告警
+    void chapterSnapFail();     // T8：吸附距离超容差 → 回落等分 + 告警
     void realDiscFile();        // 真实原盘回归（需环境变量，否则跳过）
 };
 
@@ -266,6 +306,98 @@ void TestMpls::marksDegrade()
         if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported)
             hasWarn = true;
     QVERIFY(hasWarn);
+}
+
+void TestMpls::chapterDtB()
+{
+    // 黑契 D1 实测章节模式（36 章，间距完全均匀 24:09.45）：
+    // 期望建议 = 实测分集点 0 / 24:09.45 / 48:18.90 / 1:12:28.34 / 1:36:37.79 / 2:00:47.24
+    const QList<Cs> rels = {
+        0, 31031, 40040, 74374, 132933, 141942, 144945, 153954, 162963,
+        218018, 277878, 286887, 289890, 298598, 307607, 350350, 422822,
+        431831, 434834, 444944, 453953, 497897, 567767, 576776, 579779,
+        621321, 630330, 647947, 712712, 721721, 724724, 733433, 742442,
+        792091, 857657, 866666};
+    const MplsInfo info = makeChapterInfo(rels, Cs(870470));
+    std::vector<Diagnostic> diags;
+    const ChapterMapping m = suggestChapterStarts(info, 6, diags);
+    QVERIFY(m.ok);
+    QCOMPARE(m.clip, QStringLiteral("00001"));
+    QCOMPARE(m.offsets.size(), 6);
+    const qint64 want[] = {0, 144945, 289890, 434834, 579779, 724724};
+    for (int k = 0; k < 6; ++k)
+        QCOMPARE(qint64(m.offsets[k]), want[k]);
+    // 末集集界 = 项时长；其余 = 下一集起点
+    QCOMPARE(qint64(m.episodeEnds[5]), qint64(870470));
+    QCOMPARE(qint64(m.episodeEnds[0]), qint64(144945));
+}
+
+void TestMpls::chapterShigofumi()
+{
+    // 死后文 D1 实测章节模式（29 章，集间距不均 24:30/23:40/23:35/23:56）：
+    // 等间距启发式在此盘必错（等分位与真值差可达 68 秒），靠 OP 签名纠偏。
+    // 期望建议 = 实测分集点 0 / 24:09.28 / 48:39.75 / 1:12:20 / 1:35:55.25
+    const QList<Cs> rels = {
+        0, 7608, 60711, 131815, 140824, 142526, 144928, 153937, 214047,
+        274157, 283166, 284868, 291975, 300984, 357490, 416491, 425492,
+        427193, 434000, 443009, 496713, 558817, 567817, 569519, 575525,
+        584534, 644043, 701142, 710143};
+    const MplsInfo info = makeChapterInfo(rels, Cs(713146));
+    std::vector<Diagnostic> diags;
+    const ChapterMapping m = suggestChapterStarts(info, 5, diags);
+    QVERIFY(m.ok);
+    const qint64 want[] = {0, 144928, 291975, 434000, 575525};
+    for (int k = 0; k < 5; ++k)
+        QCOMPARE(qint64(m.offsets[k]), want[k]);
+}
+
+void TestMpls::chapterInapplicable()
+{
+    // 多个正片项（一集一项的规整盘型）→ 章节模式不适用，调用方走 PlayItem 映射
+    {
+        const MplsInfo info = makeChapterInfo({0, 100000}, 24 * 6000, 1);
+        std::vector<Diagnostic> diags;
+        QVERIFY(!suggestChapterStarts(info, 2, diags).ok);
+    }
+    {   // 无章节
+        const MplsInfo info = makeChapterInfo({}, 24 * 6000);
+        std::vector<Diagnostic> diags;
+        QVERIFY(!suggestChapterStarts(info, 2, diags).ok);
+    }
+}
+
+void TestMpls::chapterEquidivide()
+{
+    // 候选数（2）< 集数（3）→ DP 不可行：等分预填 + 告警，人工核对
+    const MplsInfo info = makeChapterInfo({0, 10000}, 3 * 24 * 6000);
+    std::vector<Diagnostic> diags;
+    const ChapterMapping m = suggestChapterStarts(info, 3, diags);
+    QVERIFY(m.ok);
+    QCOMPARE(qint64(m.offsets[0]), qint64(0));
+    QCOMPARE(qint64(m.offsets[1]), qint64(24 * 6000));
+    QCOMPARE(qint64(m.offsets[2]), qint64(2 * 24 * 6000));
+    bool hasWarn = false;
+    for (const auto& d : diags)
+        if (d.level == DiagLevel::Warning)
+            hasWarn = true;
+    QVERIFY(hasWarn);
+}
+
+void TestMpls::chapterSnapFail()
+{
+    // 唯一候选离等分位 250 秒（> 150 容差）→ 回落等分值 + 按集告警
+    const MplsInfo info = makeChapterInfo({0, 85000}, 2 * 600 * 100);
+    std::vector<Diagnostic> diags;
+    const ChapterMapping m = suggestChapterStarts(info, 2, diags);
+    QVERIFY(m.ok);
+    QCOMPARE(qint64(m.offsets[0]), qint64(0));
+    QCOMPARE(qint64(m.offsets[1]), qint64(60000));   // 850 秒候选被拒，回落 600 秒
+    QCOMPARE(diags.empty(), false);
+    bool snapWarn = false;
+    for (const auto& d : diags)
+        if (d.level == DiagLevel::Warning && d.fileIndex == 1)
+            snapWarn = true;
+    QVERIFY(snapWarn);
 }
 
 void TestMpls::realDiscFile()
