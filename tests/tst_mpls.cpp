@@ -26,30 +26,39 @@ QByteArray be16(quint16 v)
 struct ItemSpec {
     quint32 in45k, out45k;   // 45kHz tick
     int     extraBytes = 0;  // still 之后的附加数据（模拟 STN 表/多角度）
+    const char* clip = "00000";   // clip 文件名（F07 同名导出）
 };
 
-// 按实证布局合成 MPLS（PlayList 段在 0x40）
+struct MarkSpec {
+    quint16 type = 1;        // 1 = Entry Mark
+    quint16 item = 0;
+    quint32 time45k = 0;     // 与所在项 IN/OUT 同轴
+};
+
+// 按实证布局合成 MPLS（PlayList 段在 0x40；有章节时 PlayListMark 段紧随其后）
 // PlayItem：u16 项长 + clip[5] + "M2TS"[4] + 3B 连接 + IN[u32] + OUT[u32]
 //           + UO 表[8] + still[3] + 附加数据
-QByteArray buildMpls(const QList<ItemSpec>& items, const char* version = "0101")
+// Mark 条目（T8 实证）：类型u16 + 项u16 + 时间u32 + PID u16 + 时长u32 = 14B
+QByteArray buildMpls(const QList<ItemSpec>& items, const QList<MarkSpec>& marks = {},
+                     const char* version = "0101")
 {
     QByteArray h = QByteArray("MPLS", 4) + QByteArray(version, 4);
     h += be32(0x40);   // playlist_start_address
-    h += be32(0);      // playListMark_start_address
+    h += be32(0);      // playListMark_start_address（下面回填）
     h += be32(0);      // extension_start_address
     h += QByteArray(0x40 - h.size(), 0);
 
     QByteArray itemsData;
     for (const ItemSpec& it : items) {
         QByteArray body;
-        body += QByteArray("00000", 5);      // clip file id
-        body += QByteArray("M2TS", 4);       // codec id
-        body += QByteArray(3, 0);            // 连接信息
+        body += QByteArray(it.clip, 5);     // clip file id
+        body += QByteArray("M2TS", 4);      // codec id
+        body += QByteArray(3, 0);           // 连接信息
         body += be32(it.in45k);
         body += be32(it.out45k);
-        body += QByteArray(8, 0);            // UO mask
-        body += char(0);                     // still mode
-        body += be16(0);                     // still time
+        body += QByteArray(8, 0);           // UO mask
+        body += char(0);                    // still mode
+        body += be16(0);                    // still time
         body += QByteArray(it.extraBytes, 0xAB);   // STN/多角度等附加
         itemsData += be16(quint16(body.size())) + body;
     }
@@ -60,7 +69,20 @@ QByteArray buildMpls(const QList<ItemSpec>& items, const char* version = "0101")
     pl += be16(quint16(items.size()));             // PlayItem 数
     pl += be16(0);                                 // SubPath 数
     pl += itemsData;
-    return h + pl;
+
+    QByteArray mk;
+    if (!marks.isEmpty()) {
+        mk += be32(quint32(2 + marks.size() * 14));   // 段长（计长度字段后）
+        mk += be16(quint16(marks.size()));
+        for (const MarkSpec& m : marks) {
+            mk += be16(m.type) + be16(m.item) + be32(m.time45k)
+                + be16(0xFFFF) + be32(0);             // PID + 时长
+        }
+        const quint32 markAddr = quint32(0x40 + pl.size());
+        h[0x0C] = char(markAddr >> 24); h[0x0D] = char(markAddr >> 16);
+        h[0x0E] = char(markAddr >> 8);  h[0x0F] = char(markAddr);
+    }
+    return h + pl + mk;
 }
 
 // 厘秒 → 45kHz tick（1 cs = 450 tick）
@@ -78,6 +100,8 @@ private slots:
     void truncated();
     void inAfterOut();
     void unknownVersion();      // 未知版本 → Info + 仍解析
+    void marksAndClips();       // T8：章节 + clip 名解析
+    void marksDegrade();        // T8：章节段截断 → 告警降级，PlayItem 保留
     void realDiscFile();        // 真实原盘回归（需环境变量，否则跳过）
 };
 
@@ -189,7 +213,7 @@ void TestMpls::inAfterOut()
 
 void TestMpls::unknownVersion()
 {
-    const QByteArray raw = buildMpls({{0, ticks(6000)}}, "0300");
+    const QByteArray raw = buildMpls({{0, ticks(6000)}}, {}, "0300");
     const MplsOutcome out = parseMpls(raw);
     QVERIFY(out.info.has_value());    // 未知版本：仍解析 + Info 告知
     bool hasInfo = false;
@@ -197,6 +221,51 @@ void TestMpls::unknownVersion()
         if (d.code == DiagCode::MplsUnsupported && d.level == DiagLevel::Info)
             hasInfo = true;
     QVERIFY(hasInfo);
+}
+
+void TestMpls::marksAndClips()
+{
+    // T8：单正片项（多集一个 m2ts）+ 章节标记
+    const quint32 in = ticks(600 * 100);   // 项内时间轴原点 10:00.00
+    const QByteArray raw = buildMpls(
+        {{in, in + ticks(5 * 24 * 6000), 0, "00001"}},
+        {{1, 0, in},                       // 集起点 = IN（rel 0）
+         {1, 0, in + ticks(90 * 100 + 9)}, // OP 结束（+90.09s，分集点签名）
+         {2, 0, in + ticks(24 * 6000 + 9 * 100 + 45)},   // 非章节类型（type=2）
+         {1, 1, in}});                     // 引用不存在的项 1 → 忽略 + 告警
+    const MplsOutcome out = parseMpls(raw);
+    QVERIFY2(out.info.has_value(),
+             out.diags.empty() ? QByteArray("无诊断")
+                               : out.diags.front().message.toUtf8());
+    QCOMPARE(out.info->items[0].clip, QStringLiteral("00001"));
+    QCOMPARE(int(out.info->marks.size()), 3);   // 第 4 条被忽略
+    QCOMPARE(out.info->marks[0].type, quint16(1));
+    QCOMPARE(out.info->marks[0].itemIndex, 0);
+    QCOMPARE(qint64(out.info->marks[0].time45k), qint64(in));
+    QCOMPARE(out.info->marks[2].type, quint16(2));   // 非 Entry Mark 原样保留
+    bool hasSkip = false;
+    for (const auto& d : out.diags)
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported)
+            hasSkip = true;
+    QVERIFY(hasSkip);
+}
+
+void TestMpls::marksDegrade()
+{
+    // 章节段被截断：告警降级为无章节，PlayItem 解析结果保留（宁可没有章节）
+    QByteArray raw = buildMpls(
+        {{0, ticks(24 * 6000)}},
+        {{1, 0, 0}, {1, 0, ticks(6000)}, {1, 0, ticks(12000)}});
+    raw.truncate(raw.size() - 10);   // 咬掉最后一条章节的一部分
+    const MplsOutcome out = parseMpls(raw);
+    QVERIFY(out.info.has_value());
+    QCOMPARE(int(out.info->items.size()), 1);
+    QVERIFY(out.info->marks.isEmpty());
+    bool hasWarn = false;
+    for (const auto& d : out.diags)
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported)
+            hasWarn = true;
+    QVERIFY(hasWarn);
 }
 
 void TestMpls::realDiscFile()
@@ -220,6 +289,15 @@ void TestMpls::realDiscFile()
         // 第 1 项（实证）：IN=10:00.000，时长 48:26.04
         QVERIFY(qAbs(qint64(out.info->items[0].in45k) - 27000000LL) < 10);
         QVERIFY(qAbs(out.info->items[0].durationCs - Cs(48 * 6000 + 26 * 100)) < 10);
+        // T8 章节回归（实证）：219 个全为 Entry Mark；第 1 个 = 项 0 的 IN 整
+        QCOMPARE(int(out.info->marks.size()), 219);
+        QCOMPARE(out.info->marks[0].type, quint16(1));
+        QCOMPARE(out.info->marks[0].itemIndex, 0);
+        QVERIFY(qAbs(qint64(out.info->marks[0].time45k) - 27000000LL) < 10);
+        bool allType1 = true;
+        for (const auto& m : out.info->marks)
+            allType1 = allType1 && m.type == 1;
+        QVERIFY(allType1);
     }
 }
 
