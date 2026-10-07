@@ -59,8 +59,10 @@ QVariant FileListModel::data(const QModelIndex& idx, int role) const
     case ColMaxEnd:
         return formatCs(e.doc->maxDialogueEnd);
     case ColOffset:
-        // 偏移列以秒显示（用户直觉单位），内部厘秒
-        return double(e.offset) / 100.0;
+        // H:MM:SS.CC 显示（与"最晚结束"列同格式）。EditRole 给字符串 → 编辑器
+        // 是 QLineEdit；之前给 double 会得到 QDoubleSpinBox（范围上限 99.99 秒），
+        // 大偏移（如分集点 24:09.45 = 1449.45 秒）根本填不进去
+        return formatCs(e.offset);
     case ColSource:
         switch (e.source) {
         case EpisodeInput::OffsetSource::Mpls:    return QStringLiteral("MPLS");
@@ -76,11 +78,12 @@ bool FileListModel::setData(const QModelIndex& idx, const QVariant& v, int role)
 {
     if (!idx.isValid() || role != Qt::EditRole || idx.column() != ColOffset)
         return false;
-    bool ok = false;
-    const double sec = v.toDouble(&ok);
-    if (!ok)
-        return false;
-    s_->setOffset(idx.row(), Cs(std::llround(sec * 100.0)));   // 秒 → 厘秒
+    // 宽容时间解析（core/time 的 Aegisub 状态机）：H:MM:SS.CC、M:SS.CC、
+    // 纯秒数（1449.45）三种写法都接受——手动填分集点时无需换算成秒
+    const auto cs = parseTimeToCs(v.toString());
+    if (!cs)
+        return false;   // 非法输入：不改值，单元格回显原值
+    s_->setOffset(idx.row(), *cs);
     return true;
 }
 
@@ -101,7 +104,7 @@ QVariant FileListModel::headerData(int sec, Qt::Orientation o, int role) const
     case ColName:    return QStringLiteral("文件名");
     case ColEp:      return QStringLiteral("集");
     case ColMaxEnd:  return QStringLiteral("最晚结束");
-    case ColOffset:  return QStringLiteral("偏移(秒)");
+    case ColOffset:  return QStringLiteral("偏移");
     case ColSource:  return QStringLiteral("来源");
     }
     return {};

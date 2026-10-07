@@ -27,6 +27,11 @@ void TestTime::parse_data()
     QTest::newRow("两位小时")    << "1:02:03.04" << Cs(3723 * 100 + 4);
     QTest::newRow("杂字符容错")  << " 0:00:07.89 " << Cs(789);
     QTest::newRow("零")          << "0:00:00.00" << Cs(0);
+    // 偏移列手动输入支持的等价格式（filelistmodel setData 复用本解析器）
+    QTest::newRow("纯秒带小数")  << "1449.45"    << Cs(144945);
+    QTest::newRow("纯秒整数")    << "1449"       << Cs(144900);
+    QTest::newRow("分秒格式")    << "24:09.45"   << Cs(144945);
+    QTest::newRow("超60分钟段")  << "90:00"      << Cs(90 * 60 * 100);
 }
 
 void TestTime::parse()
