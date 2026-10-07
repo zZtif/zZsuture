@@ -28,6 +28,7 @@ private slots:
     void reorderTop();     // 第 4 行拖到第 1 行
     void reorderBottom();  // 第 1 行拖到末尾
     void samePlace();      // 原地松开 = 无操作
+    void offsetEditFormats();  // 偏移列：三种时间写法 + 非法输入拒绝
 };
 
 namespace {
@@ -121,6 +122,38 @@ void TestDrag::samePlace()
              QStringLiteral("[01].ass"));
     QCOMPARE(QFileInfo(fx.session.entry(1).sub->path).fileName(),
              QStringLiteral("[02].ass"));
+}
+
+void TestDrag::offsetEditFormats()
+{
+    Fixture fx;
+    const auto cell = [&fx](int r) {
+        return fx.model.index(r, FileListModel::ColOffset);
+    };
+    const auto setOffset = [&fx](const QModelIndex& i, const QString& s) {
+        return fx.model.setData(i, QVariant(s), Qt::EditRole);   // 覆写无默认参
+    };
+    // 标准时刻写法（黑契第 2 集分集点）
+    QVERIFY(setOffset(cell(1), QStringLiteral("0:24:09.45")));
+    QCOMPARE(fx.session.entry(1).offset, Cs(144945));
+    // 分秒写法（等价）
+    QVERIFY(setOffset(cell(1), QStringLiteral("24:09.45")));
+    QCOMPARE(fx.session.entry(1).offset, Cs(144945));
+    // 纯秒数写法（等价；回归：旧实现给编辑器 double，QDoubleSpinBox 上限
+    // 99.99 秒，1449.45 这种值根本填不进去）
+    QVERIFY(setOffset(cell(1), QStringLiteral("1449.45")));
+    QCOMPARE(fx.session.entry(1).offset, Cs(144945));
+    // 显示层与"最晚结束"列同格式
+    QCOMPARE(fx.model.data(cell(1), Qt::DisplayRole).toString(),
+             QStringLiteral("0:24:09.45"));
+    // 非法输入：拒绝且原值不变
+    const Cs before = fx.session.entry(2).offset;
+    QVERIFY(!setOffset(cell(2), QStringLiteral("abc")));
+    QCOMPARE(fx.session.entry(2).offset, before);
+    // 手改后来源标记为"手动"
+    QCOMPARE(fx.model.data(fx.model.index(1, FileListModel::ColSource),
+                           Qt::DisplayRole).toString(),
+             QStringLiteral("手动"));
 }
 
 QTEST_MAIN(TestDrag)

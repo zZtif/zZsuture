@@ -84,7 +84,8 @@ void MainWindow::buildUi()
 
     auto* hint = new QLabel(tr("拖入字幕文件/文件夹到窗口任意位置\n"
                                "在列表中按住行拖动可排序\n"
-                               "双击偏移列可修改每集起点"));
+                               "双击偏移列改每集起点\n"
+                               "（支持 0:24:09.45 / 24:09.45 / 纯秒数）"));
     hint->setWordWrap(true);
     pv->addWidget(hint);
 
