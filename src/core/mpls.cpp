@@ -106,6 +106,7 @@ MplsOutcome parseMpls(const QByteArray& raw)
             return out;
         }
         PlayItemSpan span;
+        span.clip = QString::fromLatin1(raw.mid(off + 2, 5));
         if (!readU32(raw, off + 14, &span.in45k) ||
             !readU32(raw, off + 18, &span.out45k) || span.out45k < span.in45k) {
             out.diags.push_back(Diagnostic::make(
@@ -126,6 +127,45 @@ MplsOutcome parseMpls(const QByteArray& raw)
             QStringLiteral("该播放列表含 %1 条 SubPath（画中画/BD-J 等），"
                            "已忽略，仅按主路径 PlayItem 计算偏移")
                 .arg(nSubPaths)));
+
+    // ---- PlayListMark 段（T8）：章节标记 ----
+    // 章节是辅助数据（分集点建议用）：段异常 → 告警降级为"无章节"，
+    // PlayItem 解析结果保留——宁可没有章节，不可废掉偏移基础。
+    quint32 markAddr = 0;
+    readU32(raw, 0x0C, &markAddr);
+    if (markAddr != 0) {
+        quint32 mkLen = 0;
+        quint16 nMarks = 0;
+        if (!readU32(raw, markAddr, &mkLen) || !readU16(raw, markAddr + 4, &nMarks) ||
+            nMarks > 999 ||
+            markAddr + 4 + qsizetype(mkLen) > raw.size() ||
+            markAddr + 6 + qsizetype(nMarks) * 14 > raw.size()) {
+            out.diags.push_back(Diagnostic::make(
+                DiagLevel::Warning, DiagCode::MplsUnsupported,
+                QStringLiteral("PlayListMark 段结构异常，已忽略章节信息"
+                               "（PlayItem 偏移不受影响）")));
+        } else {
+            info.marks.reserve(nMarks);
+            for (quint16 i = 0; i < nMarks; ++i) {
+                const qsizetype o = markAddr + 6 + qsizetype(i) * 14;
+                PlayListMark mk;
+                quint16 item = 0;
+                readU16(raw, o, &mk.type);
+                readU16(raw, o + 2, &item);
+                readU32(raw, o + 4, &mk.time45k);
+                mk.itemIndex = int(item);
+                if (mk.itemIndex >= int(info.items.size())) {
+                    out.diags.push_back(Diagnostic::make(
+                        DiagLevel::Warning, DiagCode::MplsUnsupported,
+                        QStringLiteral("第 %1 个章节引用了不存在的 PlayItem"
+                                       "（%2），已忽略该章节")
+                            .arg(i + 1).arg(mk.itemIndex + 1)));
+                    continue;
+                }
+                info.marks.append(mk);
+            }
+        }
+    }
 
     out.info = std::move(info);
     return out;
