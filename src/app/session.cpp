@@ -205,7 +205,10 @@ void Session::applyMplsMapping()
     std::vector<Diagnostic> diags;
 
     // 优先：章节模式（T8，v1.4 场景）——恰一个正片 PlayItem（多集一个 m2ts）
-    const ChapterMapping ch = suggestChapterStarts(*mpls_, count(), diags);
+    QList<Cs> subEd;   // 每集字幕 ED 起点（T8 修正：ED 锚定）
+    for (const Entry& e : entries_)
+        subEd.append(detectEdStartCs(*e.doc));
+    const ChapterMapping ch = suggestChapterStarts(*mpls_, count(), subEd, diags);
     if (ch.ok) {
         chapterMode_ = true;
         mplsMainCount_ = 1;
@@ -218,6 +221,29 @@ void Session::applyMplsMapping()
             e.offset = ch.offsets[i];
             e.mplsEnd = ch.episodeEnds[i];
             e.source = EpisodeInput::OffsetSource::Chapter;
+        }
+        // 预填交叉核对（T2 洞察的安全网）：连续切割的字幕自带分集信息
+        // （黑契/死后文实测预填误差仅 0.05/2.3 秒）。章节建议与预填大幅
+        // 背离 = 大概率建议错了——死后文实测 bug（建议吸到 OP 起点、偏晚
+        // 27.6 秒）若有此检查当场拦截。
+        if (count() > 1) {
+            QList<std::shared_ptr<const AssDocument>> docs;
+            docs.reserve(entries_.size());
+            for (const Entry& e : entries_)
+                docs.append(e.doc);
+            const QList<Cs> prefill = computePrefillOffsets(docs);
+            constexpr Cs kPrefillDivergeCs = 15 * 100;
+            for (int k = 1; k < count(); ++k) {
+                if (qAbs(ch.offsets[k] - prefill[k]) > kPrefillDivergeCs)
+                    diags.push_back(Diagnostic::make(
+                        DiagLevel::Warning, DiagCode::MplsUnsupported,
+                        QStringLiteral("第 %1 集章节建议 %2 与字幕连续预填 %3 "
+                                       "相差 %4 秒——两者应接近，请逐集核对"
+                                       "（预填=上一集字幕最晚结束）")
+                            .arg(k + 1).arg(formatCs(ch.offsets[k]))
+                            .arg(formatCs(prefill[k]))
+                            .arg(qAbs(ch.offsets[k] - prefill[k]) / 100), k));
+            }
         }
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,

@@ -269,6 +269,7 @@ constexpr Cs kInfCost    = Cs(1) << 60;
 }  // namespace
 
 ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
+                                    const QList<Cs>& subEdStarts,
                                     std::vector<Diagnostic>& diags)
 {
     ChapterMapping m;
@@ -416,6 +417,48 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
                 QStringLiteral("章节签名识别出 %1 个疑似分集点，与字幕集数"
                                "（%2）不一定一致——请逐集核对建议值")
                     .arg(sigCount).arg(N)));
+    }
+
+    // ---- ED 锚定（T8 修正，死后文实测 bug）----
+    // +90 秒签名章节是 OP/ED 起点而非分集起点；ED 是双方精确已知的锚。
+    // 期望盘上 ED 位置 = 等分位 + 字幕 ED 起点（等分位无偏；基线 DP 结果
+    // 可能已被 OP 签名带偏，不作期望基准）。第 1 集不锚定（见头文件注释）。
+    if (N > 1) {
+        // 签名章节全集：其后 87~93 秒内另有章节（OP/ED 起点；成对第二项
+        // 无跟随者天然不在内）
+        QList<Cs> sigMarks;
+        for (Cs r : rels) {
+            for (Cs d : rels) {
+                if (d >= r + kSigLoCs && d <= r + kSigHiCs) {
+                    sigMarks.append(r);
+                    break;
+                }
+            }
+        }
+        for (int k = 1; k < N && k < int(subEdStarts.size()); ++k) {
+            const Cs subEd = subEdStarts[k];
+            if (subEd < 0)
+                continue;
+            const Cs expected = target(k) + subEd;
+            Cs best = -1;
+            for (Cs mk : sigMarks)
+                if (best < 0 || qAbs(mk - expected) < qAbs(best - expected))
+                    best = mk;
+            if (best < 0 || qAbs(best - expected) > kSnapTolCs)
+                continue;   // 附近无签名章节：保留基线结果
+            const Cs anchored = best - subEd;
+            // 单调性护栏：与上一集起点间距须在 10~60 分钟
+            const Cs gap = anchored - m.offsets[k - 1];
+            if (gap < kMinEpGapCs || gap > kMaxEpGapCs)
+                continue;
+            m.offsets[k] = anchored;
+            diags.push_back(Diagnostic::make(
+                DiagLevel::Info, DiagCode::MplsUnsupported,
+                QStringLiteral("第 %1 集已按片尾曲对齐：字幕 ED %2 ↔ 盘章节"
+                               " %3（比等分位偏 %4 秒）")
+                    .arg(k + 1).arg(formatCs(subEd)).arg(formatCs(best))
+                    .arg((anchored - target(k)) / 100), k));
+        }
     }
 
     // 集界 = 下一集起点（末集 = 项时长），供 C1 交叉验证
