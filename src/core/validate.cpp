@@ -5,8 +5,6 @@ namespace {
 
 // C1 阈值：字幕出点比 MPLS 出点晚 5 秒才算异常（片尾字幕略过点属正常容差）
 constexpr Cs kC1ThresholdCs = 5 * 100;
-// C2 空档阈值：相邻集间超过 2 秒的空档提示（无缝连播应为 0）
-constexpr Cs kC2GapThresholdCs = 2 * 100;
 
 }  // namespace
 
@@ -83,11 +81,11 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
                                "可能重叠")
                     .arg(i + 1).arg(i + 2)
                     .arg(formatCs(prev.maxEnd - next.offsetShifted)), i + 1));
-        else if (next.offsetShifted - prev.maxEnd > kC2GapThresholdCs)
+        else if (next.offsetShifted - prev.maxEnd > opt.boundaryGapThreshold)
             out.push_back(Diagnostic::make(
                 DiagLevel::Info, DiagCode::BoundaryGap,
-                QStringLiteral("第 %1 集与第 %2 集之间有 %3 空档（无缝连播"
-                               "通常应为 0，请确认偏移）")
+                QStringLiteral("第 %1 集与第 %2 集之间有 %3 空档——请确认偏移"
+                               "或集间黑场是否正常")
                     .arg(i + 1).arg(i + 2)
                     .arg(formatCs(next.offsetShifted - prev.maxEnd)), i + 1));
     }

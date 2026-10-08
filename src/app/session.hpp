@@ -36,15 +36,19 @@ public:
     int  count() const { return int(entries_.size()); }
     const Entry& entry(int row) const { return entries_[size_t(row)]; }
 
-    // ---- MPLS（阶段 3，T1/T3）----
-    // 读文件 → 解析 → 映射到每集（D10：短项过滤 + 起始正片对齐）。
-    // 生效期间全部行来源切为 MPLS；移除则回落预填。结构性变化会重新映射。
+    // ---- MPLS（阶段 3 T1/T3 + 阶段 4 T8 章节模式）----
+    // 读文件 → 解析 → 映射到每集。优先尝试章节模式（v1.4 场景：恰一个正片
+    // PlayItem = 多集一个 m2ts，按章节建议分集点，来源标"章节"）；不适用则
+    // 回落 PlayItem 映射（D10：短项过滤 + 起始正片对齐，来源标"MPLS"）。
     bool loadMplsFile(const QString& path, QString* errMsg);
     void clearMpls();
     bool hasMpls() const { return mpls_.has_value(); }
     const MplsInfo* mpls() const { return mpls_ ? &*mpls_ : nullptr; }
     int  mplsMainCount() const { return mplsMainCount_; }   // 正片项总数
+    bool mplsChapterMode() const { return chapterMode_; }   // 章节模式生效中
+    QString mplsClipName() const { return mplsClipName_; }  // 多集 m2ts 的 clip 名（F07）
     // 字幕第 1 集对应第几个正片（0 基）——整季连播链只合并中间几集的场景
+    // （章节模式下无效：分集点来自章节而非 PlayItem 边界）
     void setMplsStartMain(int startMain);
 
     // ---- 参数（F03 设定与 F06 微调是同一入口）----
@@ -78,6 +82,8 @@ private:
     std::optional<MplsInfo> mpls_;
     int mplsStartMain_ = 0;         // 字幕第 1 集对应的正片序号（0 基）
     int mplsMainCount_ = 0;
+    bool chapterMode_ = false;      // T8：章节分集模式生效中
+    QString mplsClipName_;          // 章节模式下多集 m2ts 的 clip 名
 };
 
 }  // namespace suture
