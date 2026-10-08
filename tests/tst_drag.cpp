@@ -38,6 +38,7 @@ private slots:
     void contentEpisodeSort();    // F16：文件名无集数 → 内容标记识别并自动排序
     void orderMismatchWarning();  // T10：拖动致乱序 → 告警不静默改序
     void missingEpisodeWarning(); // T10：集数有洞 → 缺集告警
+    void chapterPrefillDivergence(); // T8 修正：章节建议与预填背离 → 告警
 };
 
 namespace {
@@ -323,6 +324,60 @@ void TestDrag::missingEpisodeWarning()
             && d.message.contains(QStringLiteral("缺第 3 集")))
             hasGap = true;
     QVERIFY(hasGap);
+}
+
+void TestDrag::chapterPrefillDivergence()
+{
+    // 死后文实测 bug 的安全网：章节建议与字幕连续预填大幅背离 → 按集告警。
+    // 构造：ep1 字幕被截短（10:00 结束 → 预填 ep2 = 10:00），盘内 ED 章节把
+    // ep2 锚定到 24:00 → 背离 14 分钟，必须告警（连续切割字幕的预填误差
+    // 实测仅 0.05/2.3 秒，大幅背离 = 建议可疑）。
+    QTemporaryDir dir;
+    Session session;
+    // ep1 字幕：单行 10:00 结束（截短）；ep2 字幕：带 ed_ch 行于 20:00
+    const char* kAssEp1 =
+        "[Script Info]\nScriptType: v4.00+\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Actor, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:10:00.00,Default,,0,0,0,,x\n";
+    const char* kAssEp2 =
+        "[Script Info]\nScriptType: v4.00+\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Actor, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:23:00.00,Default,,0,0,0,,x\n"
+        "Dialogue: 0,0:20:00.00,0:20:05.00,ed_ch,,0,0,0,,ED\n";
+    int n = 1;
+    for (const char* tpl : {kAssEp1, kAssEp2}) {
+        const QString p = dir.filePath(
+            QStringLiteral("[%1].ass").arg(n++, 2, 10, QChar(u'0')));
+        QFile f(p);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(tpl);
+        f.close();
+        session.addUrls({QUrl::fromLocalFile(p)});
+    }
+    // 盘：2 集 × 24 分钟；ED 对 44:00→45:30.09；ep2 起点 24:00（无标记）
+    const quint32 origin = ticks(600 * 100);
+    const QByteArray raw = buildMpls(
+        {{origin, origin + ticks(2 * 24 * 6000), 0, "00001"}},
+        {{1, 0, origin + ticks(264000)}, {1, 0, origin + ticks(273009)}});
+    const QString mplsPath = dir.filePath(QStringLiteral("00000.mpls"));
+    QFile mf(mplsPath);
+    QVERIFY(mf.open(QIODevice::WriteOnly));
+    mf.write(raw);
+    mf.close();
+    QString err;
+    QVERIFY(session.loadMplsFile(mplsPath, &err));
+    QVERIFY(session.mplsChapterMode());
+    QCOMPARE(session.entry(1).offset, Cs(24 * 6000));   // ED 锚定结果
+    bool hasDiverge = false;
+    for (const Diagnostic& d : session.allDiags())
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported
+            && d.fileIndex == 1 && d.message.contains(QStringLiteral("相差")))
+            hasDiverge = true;
+    QVERIFY(hasDiverge);
 }
 
 QTEST_MAIN(TestDrag)

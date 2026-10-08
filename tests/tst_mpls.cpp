@@ -24,8 +24,9 @@ private slots:
     void unknownVersion();      // 未知版本 → Info + 仍解析
     void marksAndClips();       // T8：章节 + clip 名解析
     void marksDegrade();        // T8：章节段截断 → 告警降级，PlayItem 保留
-    void chapterDtB();          // T8：黑契型 36 章 / 6 集 → 建议全对
-    void chapterShigofumi();    // T8：死后文型 29 章间距不均 / 5 集 → 签名纠偏
+    void chapterDtB();          // T8：黑契型 36 章 / 6 集，ED 锚定
+    void chapterShigofumi();    // T8：死后文型 29 章，ED 锚定（实测 bug 回归）
+    void chapterEdAnchorBeatsDp();  // T8 修正：ED 锚定纠正基线 DP 的吸附错误
     void chapterInapplicable(); // T8：多正片项 / 无章节 → 不适用，回落 PlayItem
     void chapterEquidivide();   // T8：候选不足 → 等分预填 + 告警
     void chapterSnapFail();     // T8：吸附距离超容差 → 回落等分 + 告警
@@ -198,8 +199,10 @@ void TestMpls::marksDegrade()
 
 void TestMpls::chapterDtB()
 {
-    // 黑契 D1 实测章节模式（36 章，间距完全均匀 24:09.45）：
-    // 期望建议 = 实测分集点 0 / 24:09.45 / 48:18.90 / 1:12:28.34 / 1:36:37.79 / 2:00:47.24
+    // 黑契 D1 实测章节（36 个）+ 六集字幕真实 ED 起点（各集 22:09.35）。
+    // ED 锚定期望 = 盘 ED 章节 − 字幕 ED：与所有者 PowerDVD 目测验证过的
+    // 偏移（0 / 24:09.45 / 48:18.90 / 1:12:28.34 / 1:36:37.79 / 2:00:47.24）
+    // 吻合到 0.03 秒内。
     const QList<Cs> rels = {
         0, 31031, 40040, 74374, 132933, 141942, 144945, 153954, 162963,
         218018, 277878, 286887, 289890, 298598, 307607, 350350, 422822,
@@ -208,23 +211,27 @@ void TestMpls::chapterDtB()
         792091, 857657, 866666};
     const MplsInfo info = makeChapterInfo(rels, Cs(870470));
     std::vector<Diagnostic> diags;
-    const ChapterMapping m = suggestChapterStarts(info, 6, diags);
+    const ChapterMapping m = suggestChapterStarts(
+        info, 6, {Cs(132935), Cs(132935), Cs(132935), Cs(132935), Cs(132935),
+                  Cs(132935)}, diags);
     QVERIFY(m.ok);
     QCOMPARE(m.clip, QStringLiteral("00001"));
     QCOMPARE(m.offsets.size(), 6);
-    const qint64 want[] = {0, 144945, 289890, 434834, 579779, 724724};
+    const qint64 want[] = {0, 144943, 289887, 434832, 579777, 724722};
     for (int k = 0; k < 6; ++k)
         QCOMPARE(qint64(m.offsets[k]), want[k]);
     // 末集集界 = 项时长；其余 = 下一集起点
     QCOMPARE(qint64(m.episodeEnds[5]), qint64(870470));
-    QCOMPARE(qint64(m.episodeEnds[0]), qint64(144945));
+    QCOMPARE(qint64(m.episodeEnds[0]), qint64(144943));
 }
 
 void TestMpls::chapterShigofumi()
 {
-    // 死后文 D1 实测章节模式（29 章，集间距不均 24:30/23:40/23:35/23:56）：
-    // 等间距启发式在此盘必错（等分位与真值差可达 68 秒），靠 OP 签名纠偏。
-    // 期望建议 = 实测分集点 0 / 24:09.28 / 48:39.75 / 1:12:20 / 1:35:55.25
+    // 死后文 D1 实测章节（29 个，每集结构 [预告][首语][OP 90.09s][A/B]
+    // [ED 90.09s]——分集起点"首语"不带签名，纯签名启发会吸到 OP 起点偏晚
+    // 27.6 秒，即 2026-10-08 所有者实测报告的 bug）。
+    // 字幕真实 ED 起点：ep1 22:04.66（晚于歌曲起点 6.5s，老字幕组习惯，
+    // 故第 1 集不锚定保持 0）；ep2-5 22:02.57/22:02.67。
     const QList<Cs> rels = {
         0, 7608, 60711, 131815, 140824, 142526, 144928, 153937, 214047,
         274157, 283166, 284868, 291975, 300984, 357490, 416491, 425492,
@@ -232,11 +239,37 @@ void TestMpls::chapterShigofumi()
         584534, 644043, 701142, 710143};
     const MplsInfo info = makeChapterInfo(rels, Cs(713146));
     std::vector<Diagnostic> diags;
-    const ChapterMapping m = suggestChapterStarts(info, 5, diags);
+    const ChapterMapping m = suggestChapterStarts(
+        info, 5, {Cs(132466), Cs(132257), Cs(132257), Cs(132267), Cs(132267)},
+        diags);
     QVERIFY(m.ok);
-    const qint64 want[] = {0, 144928, 291975, 434000, 575525};
+    // ep1 不锚定 = 0；ep2-5 按 ED 锚定（与 OP 起点锚定交叉验证差 ≤2.7 秒，
+    // 为老字幕 TV 时轴与 BD 版的固有内部漂移，全局微调收敛）
+    const qint64 want[] = {0, 141900, 284234, 426550, 568875};
     for (int k = 0; k < 5; ++k)
         QCOMPARE(qint64(m.offsets[k]), want[k]);
+}
+
+void TestMpls::chapterEdAnchorBeatsDp()
+{
+    // 分集起点无章节、近处有诱饵签名章节（OP 起点）：基线 DP 吸到诱饵
+    // （偏晚 30 秒），ED 锚定给出正确值——死后文 bug 的最小化复现。
+    // 盘：2 集 × 24 分钟；ep2 起点 24:00 无标记；诱饵 OP 对 24:30→26:00.09；
+    // ED 对 44:00→45:30.09；噪声 33:20。
+    const QList<Cs> rels = {0, 147000, 156009, 200000, 264000, 273009};
+    const MplsInfo info = makeChapterInfo(rels, 2 * 24 * 6000);
+    std::vector<Diagnostic> diags;
+    const ChapterMapping m = suggestChapterStarts(
+        info, 2, {Cs(-1), Cs(20 * 6000)}, diags);   // ep2 字幕 ED 在其 20:00
+    QVERIFY(m.ok);
+    QCOMPARE(qint64(m.offsets[0]), qint64(0));            // 第 1 集不锚定
+    QCOMPARE(qint64(m.offsets[1]), qint64(24 * 6000));    // 24:00，而非诱饵 24:30
+    bool hasEdInfo = false;
+    for (const auto& d : diags)
+        if (d.code == DiagCode::MplsUnsupported && d.fileIndex == 1
+            && d.message.contains(QStringLiteral("片尾曲")))
+            hasEdInfo = true;
+    QVERIFY(hasEdInfo);
 }
 
 void TestMpls::chapterInapplicable()
@@ -245,12 +278,12 @@ void TestMpls::chapterInapplicable()
     {
         const MplsInfo info = makeChapterInfo({0, 100000}, 24 * 6000, 1);
         std::vector<Diagnostic> diags;
-        QVERIFY(!suggestChapterStarts(info, 2, diags).ok);
+        QVERIFY(!suggestChapterStarts(info, 2, {}, diags).ok);
     }
     {   // 无章节
         const MplsInfo info = makeChapterInfo({}, 24 * 6000);
         std::vector<Diagnostic> diags;
-        QVERIFY(!suggestChapterStarts(info, 2, diags).ok);
+        QVERIFY(!suggestChapterStarts(info, 2, {}, diags).ok);
     }
 }
 
@@ -259,7 +292,7 @@ void TestMpls::chapterEquidivide()
     // 候选数（2）< 集数（3）→ DP 不可行：等分预填 + 告警，人工核对
     const MplsInfo info = makeChapterInfo({0, 10000}, 3 * 24 * 6000);
     std::vector<Diagnostic> diags;
-    const ChapterMapping m = suggestChapterStarts(info, 3, diags);
+    const ChapterMapping m = suggestChapterStarts(info, 3, {}, diags);
     QVERIFY(m.ok);
     QCOMPARE(qint64(m.offsets[0]), qint64(0));
     QCOMPARE(qint64(m.offsets[1]), qint64(24 * 6000));
@@ -276,7 +309,7 @@ void TestMpls::chapterSnapFail()
     // 唯一候选离等分位 250 秒（> 150 容差）→ 回落等分值 + 按集告警
     const MplsInfo info = makeChapterInfo({0, 85000}, 2 * 600 * 100);
     std::vector<Diagnostic> diags;
-    const ChapterMapping m = suggestChapterStarts(info, 2, diags);
+    const ChapterMapping m = suggestChapterStarts(info, 2, {}, diags);
     QVERIFY(m.ok);
     QCOMPARE(qint64(m.offsets[0]), qint64(0));
     QCOMPARE(qint64(m.offsets[1]), qint64(60000));   // 850 秒候选被拒，回落 600 秒

@@ -66,6 +66,23 @@ EpGuess guessEpisodeFromContent(const AssDocument& doc)
     return {best, true};
 }
 
+Cs detectEdStartCs(const AssDocument& doc)
+{
+    // 独立 ed/ending 词：匹配 ed_chi / ED_jap / ed_jpn / ending，排除
+    // Credited 之类子串误命中（"Default" 无相邻 e-d，天然不匹配）
+    static const QRegularExpression re(
+        QStringLiteral("(^|[^a-zA-Z])(ed|ending)([^a-zA-Z]|$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    Cs best = -1;
+    for (const EventLine& ev : doc.events) {
+        if (ev.isComment || ev.zeroDuration() || !re.match(ev.style).hasMatch())
+            continue;
+        if (best < 0 || ev.start < best)
+            best = ev.start;
+    }
+    return best;
+}
+
 bool naturalLessThan(const QString& a, const QString& b)
 {
     static QCollator collator(QLocale::system());
