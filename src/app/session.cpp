@@ -114,6 +114,30 @@ void Session::checkEpisodeOrder()
     for (const Entry& e : entries_)
         if (!e.sub->epConfident)
             return;
+
+    // T10：集数有洞（如 1、2、4）→ 提示可能缺集（多集一个 m2ts 场景缺一集
+    // 就会整体错位，C1/C2 之外的前置提醒）
+    int lo = entries_.front().sub->epNumber, hi = lo;
+    for (const Entry& e : entries_) {
+        lo = qMin(lo, e.sub->epNumber);
+        hi = qMax(hi, e.sub->epNumber);
+    }
+    QString missing;
+    for (int n = lo; n <= hi; ++n) {
+        bool present = false;
+        for (const Entry& e : entries_)
+            present = present || e.sub->epNumber == n;
+        if (!present)
+            missing += (missing.isEmpty() ? QString() : QStringLiteral("、"))
+                     + QString::number(n);
+    }
+    if (!missing.isEmpty())
+        orderDiags_.push_back(Diagnostic::make(
+            DiagLevel::Warning, DiagCode::EpisodeUnrecognized,
+            QStringLiteral("集数不连续：缺第 %1 集（已载入第 %2~%3 集的"
+                           "字幕）——多集一个 m2ts 时缺集会整体错位，请补齐"
+                           "或确认").arg(missing).arg(lo).arg(hi)));
+
     for (int i = 1; i < count(); ++i) {
         const int prev = entries_[size_t(i - 1)].sub->epNumber;
         const int cur = entries_[size_t(i)].sub->epNumber;

@@ -29,6 +29,7 @@ private slots:
     void chapterInapplicable(); // T8：多正片项 / 无章节 → 不适用，回落 PlayItem
     void chapterEquidivide();   // T8：候选不足 → 等分预填 + 告警
     void chapterSnapFail();     // T8：吸附距离超容差 → 回落等分 + 告警
+    void degeneratePlaylist();  // T9：全同连续项 → 疑似假列表告警（义妹型）
     void realDiscFile();        // 真实原盘回归（需环境变量，否则跳过）
 };
 
@@ -285,6 +286,26 @@ void TestMpls::chapterSnapFail()
         if (d.level == DiagLevel::Warning && d.fileIndex == 1)
             snapWarn = true;
     QVERIFY(snapWarn);
+}
+
+void TestMpls::degeneratePlaylist()
+{
+    // 义妹 00000.mpls 实测型：50 个相同 2:47 项冒充"总时长最长"的假列表。
+    // 结构合法 → 解析照常 + Warning 提示换文件。
+    const QByteArray raw = buildMpls({
+        {0, ticks(16700), 0, "00000"},
+        {0, ticks(16700), 0, "00000"},
+        {0, ticks(16700), 0, "00000"},
+        {0, ticks(16700), 0, "00000"},
+    });
+    const MplsOutcome out = parseMpls(raw);
+    QVERIFY(out.info.has_value());           // 解析不拒绝
+    QCOMPARE(int(out.info->items.size()), 4);
+    bool hasWarn = false;
+    for (const auto& d : out.diags)
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported)
+            hasWarn = true;
+    QVERIFY(hasWarn);
 }
 
 void TestMpls::realDiscFile()
