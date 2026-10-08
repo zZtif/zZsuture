@@ -71,6 +71,7 @@ signals:
 private:
     void recomputePrefill();   // 只回填"来源=Prefill 且未被手改"的行（§5.9）
     void applyMplsMapping();   // mpls_ 存在时按 D10 重映射全部行
+    void checkEpisodeOrder();  // T10：列表顺序 vs 集数一致性（告警不静默改序）
     void remerge();
 
     QList<Entry> entries_;
@@ -79,6 +80,7 @@ private:
     std::optional<MergeResult> result_;
     QList<Diagnostic> dropDiags_;   // expandDrop 的忽略/去重信息
     QList<Diagnostic> mplsDiags_;   // MPLS 解析/映射诊断
+    QList<Diagnostic> orderDiags_;  // 顺序/集数一致性诊断（结构性变化时重算）
     std::optional<MplsInfo> mpls_;
     int mplsStartMain_ = 0;         // 字幕第 1 集对应的正片序号（0 基）
     int mplsMainCount_ = 0;

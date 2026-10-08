@@ -13,6 +13,7 @@ private slots:
     void patterns();
     void naturalSort();
     void dropExpansion();
+    void contentMarkers();   // P12/F16：内容集数识别
 };
 
 void TestEpNum::patterns_data()
@@ -44,6 +45,52 @@ void TestEpNum::patterns()
     const EpGuess g = guessEpisodeNumber(fileName);
     QCOMPARE(g.number, expected);
     QCOMPARE(g.confident, confident);
+}
+
+namespace {
+// 造一个含 Title 与若干事件文本的文档（内容识别测试用）
+AssDocument docWith(const QString& title, const QStringList& texts)
+{
+    AssDocument doc;
+    ScriptInfoEntry e;
+    e.key = QStringLiteral("Title");
+    e.value = title;
+    doc.info.entries.push_back(e);
+    for (const QString& t : texts) {
+        EventLine ev;
+        ev.end = 100;
+        ev.text = t;
+        doc.events.push_back(ev);
+    }
+    return doc;
+}
+}  // namespace
+
+void TestEpNum::contentMarkers()
+{
+    // 实证场景：死后文盘内 2014 年外挂，Title 即含 "Episode 1"
+    EpGuess g = guessEpisodeFromContent(
+        docWith(QStringLiteral("Shigofumi DVDRIP Vol.1 Episode 1"), {}));
+    QVERIFY(g.confident);
+    QCOMPARE(g.number, 1);
+
+    // 正文第2話出现两次 + 次回预告提到第3話一次 → 2 胜出（次回不致带偏）
+    g = guessEpisodeFromContent(docWith(QString(), {
+        QStringLiteral("第二话开始了"),     // 无集号模式
+        QStringLiteral("第2話 「信」"),
+        QStringLiteral(" EP2 Title Card "),
+        QStringLiteral("次回、第3話「梦」"),
+    }));
+    QVERIFY(g.confident);
+    QCOMPARE(g.number, 2);
+
+    // 无标记 / 证据并列 → 不硬猜
+    QVERIFY(!guessEpisodeFromContent(docWith(QString(), {
+        QStringLiteral("普通对白"), QStringLiteral("ED Staff"),
+    })).confident);
+    QVERIFY(!guessEpisodeFromContent(docWith(QString(), {
+        QStringLiteral("第5話"), QStringLiteral("第6話"),
+    })).confident);
 }
 
 void TestEpNum::naturalSort()

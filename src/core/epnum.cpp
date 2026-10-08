@@ -28,6 +28,44 @@ EpGuess guessEpisodeNumber(const QString& fileName)
     return {-1, false};
 }
 
+EpGuess guessEpisodeFromContent(const AssDocument& doc)
+{
+    // 三种集数模式（P12）。第X話/话 全角数字兼容（\d 匹配全角）。
+    static const QRegularExpression pats[] = {
+        QRegularExpression{QStringLiteral("第\\s*(\\d{1,3})\\s*[話话]")},
+        QRegularExpression{QStringLiteral("Episode\\s*#?\\s*(\\d{1,3})"),
+                           QRegularExpression::CaseInsensitiveOption},
+        QRegularExpression{QStringLiteral("\\bEP\\s*0*(\\d{1,3})\\b"),
+                           QRegularExpression::CaseInsensitiveOption},
+    };
+    // 计分：Title 命中 ×3（作者刻意声明），事件文本命中 ×1
+    QMap<int, int> score;
+    const QString title = doc.info.value(QStringLiteral("Title")).value_or(QString());
+    for (const auto& re : pats) {
+        for (auto it = re.globalMatch(title); it.hasNext(); )
+            score[it.next().captured(1).toInt()] += 3;
+        for (const EventLine& ev : doc.events) {
+            for (auto it = re.globalMatch(ev.text); it.hasNext(); )
+                score[it.next().captured(1).toInt()] += 1;
+        }
+    }
+    // 总分最高且严格领先第二名才算识别（并列 = 证据冲突，不硬猜）；
+    // ≥2 分门槛挡住"仅次回预告提到一次下一集集号"的单 hit 噪声
+    int best = -1, bestScore = 0, runnerUp = 0;
+    for (auto it = score.cbegin(); it != score.cend(); ++it) {
+        if (it.value() > bestScore) {
+            runnerUp = bestScore;
+            bestScore = it.value();
+            best = it.key();
+        } else if (it.value() > runnerUp) {
+            runnerUp = it.value();
+        }
+    }
+    if (best < 0 || bestScore < 2 || bestScore <= runnerUp)
+        return {-1, false};
+    return {best, true};
+}
+
 bool naturalLessThan(const QString& a, const QString& b)
 {
     static QCollator collator(QLocale::system());

@@ -160,7 +160,20 @@ LoadOutcome loadSubtitleFile(const QString& path, quint64 assignId,
     sub.doc.sourcePath = path;
     sub.doc.encodingName = encodingName;
     sub.loadDiags = std::move(parsed.diags);
-    const EpGuess ep = guessEpisodeNumber(QFileInfo(path).fileName());
+    // F16/P12 集数识别两级：文件名（P6）→ 内容标记（Title/第X話/Episode X）。
+    // 内容级成功时不告警（识别链正常工作）；两级都失败才提示自然排序。
+    EpGuess ep = guessEpisodeNumber(QFileInfo(path).fileName());
+    if (!ep.confident) {
+        const EpGuess content = guessEpisodeFromContent(sub.doc);
+        if (content.confident) {
+            ep = content;
+            sub.loadDiags.push_back(Diagnostic::make(
+                DiagLevel::Info, DiagCode::EpisodeUnrecognized,
+                QStringLiteral("文件名无集数，按内容标记识别为第 %1 集（Title/"
+                               "正文中的集号），排序已自动采用——请核对")
+                    .arg(ep.number)));
+        }
+    }
     sub.epNumber = ep.number;
     sub.epConfident = ep.confident;
     if (!ep.confident)

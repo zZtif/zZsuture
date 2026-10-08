@@ -55,6 +55,7 @@ void Session::addUrls(const QList<QUrl>& urls)
         applyMplsMapping();
     else
         recomputePrefill();
+    checkEpisodeOrder();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -72,6 +73,7 @@ void Session::removeRows(const QList<int>& rows)
         applyMplsMapping();
     else
         recomputePrefill();
+    checkEpisodeOrder();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -96,9 +98,40 @@ void Session::moveRows(int srcRow, int count_, int destRow)
         applyMplsMapping();
     else
         recomputePrefill();
+    checkEpisodeOrder();
     remerge();
     emit structureChanged();
     emit resultChanged();
+}
+
+void Session::checkEpisodeOrder()
+{
+    // T10：全部行集数可识别时核对顺序与重复（部分可识别则信息不足，不告警）。
+    // 只告警不重排——顺序是用户的决定权（F16 冻结方案：建议不静默改序）。
+    orderDiags_.clear();
+    if (count() < 2)
+        return;
+    for (const Entry& e : entries_)
+        if (!e.sub->epConfident)
+            return;
+    for (int i = 1; i < count(); ++i) {
+        const int prev = entries_[size_t(i - 1)].sub->epNumber;
+        const int cur = entries_[size_t(i)].sub->epNumber;
+        if (cur == prev) {
+            orderDiags_.push_back(Diagnostic::make(
+                DiagLevel::Warning, DiagCode::EpisodeUnrecognized,
+                QStringLiteral("第 %1、%2 行都被识别为第 %3 集——请确认"
+                               "是否重复载入了同一集")
+                    .arg(i).arg(i + 1).arg(cur), i));
+        } else if (cur < prev) {
+            orderDiags_.push_back(Diagnostic::make(
+                DiagLevel::Warning, DiagCode::EpisodeUnrecognized,
+                QStringLiteral("列表顺序与集数不符：第 %1 行是第 %2 集，"
+                               "排在第 %3 集之后——如非有意为之请拖动调整")
+                    .arg(i + 1).arg(cur).arg(prev), i));
+            break;   // 一次失序报一条即可，避免刷屏
+        }
+    }
 }
 
 void Session::setOffset(int row, Cs offset)
@@ -268,6 +301,7 @@ void Session::remerge()
 QList<Diagnostic> Session::allDiags() const
 {
     QList<Diagnostic> out = dropDiags_;
+    out += orderDiags_;
     out += mplsDiags_;
     // 装载诊断补上文件在列表中的位置（装载时还不知道顺序）
     for (int i = 0; i < count(); ++i) {
