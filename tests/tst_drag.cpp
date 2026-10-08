@@ -37,6 +37,7 @@ private slots:
     void chapterModeFallback();   // T8 集成：多正片项回落 PlayItem 映射
     void contentEpisodeSort();    // F16：文件名无集数 → 内容标记识别并自动排序
     void orderMismatchWarning();  // T10：拖动致乱序 → 告警不静默改序
+    void missingEpisodeWarning(); // T10：集数有洞 → 缺集告警
 };
 
 namespace {
@@ -299,6 +300,29 @@ void TestDrag::orderMismatchWarning()
         QVERIFY2(!(d.level == DiagLevel::Warning &&
                    d.code == DiagCode::EpisodeUnrecognized),
                  qPrintable(d.message));
+}
+
+void TestDrag::missingEpisodeWarning()
+{
+    // T10：集数有洞（1、2、4 → 缺 3）→ 告警（多集 m2ts 缺集会整体错位）
+    QTemporaryDir dir;
+    Session session;
+    for (const int n : {1, 2, 4}) {
+        const QString p = dir.filePath(
+            QStringLiteral("[%1].ass").arg(n, 2, 10, QChar(u'0')));
+        QFile f(p);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(kAss);
+        f.close();
+        session.addUrls({QUrl::fromLocalFile(p)});
+    }
+    QCOMPARE(session.count(), 3);
+    bool hasGap = false;
+    for (const Diagnostic& d : session.allDiags())
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::EpisodeUnrecognized
+            && d.message.contains(QStringLiteral("缺第 3 集")))
+            hasGap = true;
+    QVERIFY(hasGap);
 }
 
 QTEST_MAIN(TestDrag)

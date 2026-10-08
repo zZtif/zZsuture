@@ -128,6 +128,28 @@ MplsOutcome parseMpls(const QByteArray& raw)
                            "已忽略，仅按主路径 PlayItem 计算偏移")
                 .arg(nSubPaths)));
 
+    // ---- T9：同文件内完全相同的连续项 → 疑似假/循环播放列表 ----
+    // 实证：义妹 00000.mpls = 50 个完全相同的 2:47 短项冒充"总时长最长"，
+    // 按它算偏移会得到 2:47/5:34/… 的垃圾值。只告警不拒绝（结构上合法），
+    // 由用户换正确的列表文件。
+    int runStart = 0;
+    for (int i = 1; i <= int(info.items.size()); ++i) {
+        const bool same = i < int(info.items.size())
+            && info.items[i].clip == info.items[runStart].clip
+            && info.items[i].in45k == info.items[runStart].in45k
+            && info.items[i].out45k == info.items[runStart].out45k;
+        if (!same) {
+            if (i - runStart >= 3)
+                out.diags.push_back(Diagnostic::make(
+                    DiagLevel::Warning, DiagCode::MplsUnsupported,
+                    QStringLiteral("第 %1~%2 个 PlayItem 完全相同（clip %3）——"
+                                   "疑似假播放列表/循环列表，请换用真实的主"
+                                   "播放列表文件")
+                        .arg(runStart + 1).arg(i).arg(info.items[runStart].clip)));
+            runStart = i;
+        }
+    }
+
     // ---- PlayListMark 段（T8）：章节标记 ----
     // 章节是辅助数据（分集点建议用）：段异常 → 告警降级为"无章节"，
     // PlayItem 解析结果保留——宁可没有章节，不可废掉偏移基础。
