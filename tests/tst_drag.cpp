@@ -35,6 +35,8 @@ private slots:
     void offsetEditFormats();  // 偏移列：三种时间写法 + 非法输入拒绝
     void chapterModeEndToEnd();   // T8 集成：章节模式生效 + 同名导出 + C2 阈值
     void chapterModeFallback();   // T8 集成：多正片项回落 PlayItem 映射
+    void contentEpisodeSort();    // F16：文件名无集数 → 内容标记识别并自动排序
+    void orderMismatchWarning();  // T10：拖动致乱序 → 告警不静默改序
 };
 
 namespace {
@@ -244,6 +246,59 @@ void TestDrag::chapterModeFallback()
     QCOMPARE(session.entry(1).offset, Cs(24 * 6000));
     QCOMPARE(session.entry(1).source, EpisodeInput::OffsetSource::Mpls);
     QCOMPARE(session.suggestFileName(), QStringLiteral("[01-02]_merged.ass"));
+}
+
+void TestDrag::contentEpisodeSort()
+{
+    // 文件名无集数（P6 失败）→ 内容标记（P12）接手：Title 带 Episode 号的
+    // 两个文件按内容识别集数并自动排好（F16：不想手动预测集数）
+    QTemporaryDir dir;
+    Session session;
+    const char* kAssTmpl =
+        "[Script Info]\nScriptType: v4.00+\nTitle: %1\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Actor, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:23:00.00,Default,,0,0,0,,x\n";
+    for (const auto& pair : {qMakePair(QStringLiteral("aaa.ass"), 2),
+                             qMakePair(QStringLiteral("bbb.ass"), 1)}) {
+        QFile f(dir.filePath(pair.first));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QString(kAssTmpl)
+                    .arg(QStringLiteral("SomeShow Episode %1").arg(pair.second))
+                    .toUtf8());
+        f.close();
+    }
+    session.addUrls({QUrl::fromLocalFile(dir.filePath(QStringLiteral("aaa.ass"))),
+                     QUrl::fromLocalFile(dir.filePath(QStringLiteral("bbb.ass")))});
+    QCOMPARE(session.count(), 2);
+    // aaa(第2集) 先拖入，按内容识别后 bbb(第1集) 应排到前面
+    QCOMPARE(QFileInfo(session.entry(0).sub->path).fileName(),
+             QStringLiteral("bbb.ass"));
+    QVERIFY(session.entry(0).sub->epConfident);
+    QCOMPARE(session.entry(0).sub->epNumber, 1);
+    QCOMPARE(session.entry(1).sub->epNumber, 2);
+}
+
+void TestDrag::orderMismatchWarning()
+{
+    // 用户拖动致乱序：告警提示（不静默改序——顺序是用户的决定权）
+    Fixture fx;
+    // 初始 [01][02][03][04]，把第 1 行拖到末尾 → [02][03][04][01]
+    fx.session.moveRows(0, 1, 4);
+    QCOMPARE(QFileInfo(fx.session.entry(3).sub->path).fileName(),
+             QStringLiteral("[01].ass"));
+    bool hasMismatch = false;
+    for (const Diagnostic& d : fx.session.allDiags())
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::EpisodeUnrecognized)
+            hasMismatch = true;
+    QVERIFY(hasMismatch);
+    // 拖回原序 → 告警消失
+    fx.session.moveRows(3, 1, 0);
+    for (const Diagnostic& d : fx.session.allDiags())
+        QVERIFY2(!(d.level == DiagLevel::Warning &&
+                   d.code == DiagCode::EpisodeUnrecognized),
+                 qPrintable(d.message));
 }
 
 QTEST_MAIN(TestDrag)
