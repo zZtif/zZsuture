@@ -136,13 +136,44 @@ void Session::recomputePrefill()
 
 void Session::applyMplsMapping()
 {
-    // MPLS 生效期间全部行来源切换为 MPLS（架构 §5.9：拖入 MPLS 后覆盖预填）。
+    // MPLS 生效期间全部行来源切换（架构 §5.9：拖入 MPLS 后覆盖预填）。
     // 超出正片总数时 mapItemsToEpisodes 发告警并保持现有偏移（手动兜底）。
     mplsDiags_.clear();
     mplsMainCount_ = 0;
+    chapterMode_ = false;
+    mplsClipName_.clear();
+    options_.boundaryGapThreshold = 2 * 100;   // PlayItem/预填模式：无缝连播口径
     if (!mpls_)
         return;
     std::vector<Diagnostic> diags;
+
+    // 优先：章节模式（T8，v1.4 场景）——恰一个正片 PlayItem（多集一个 m2ts）
+    const ChapterMapping ch = suggestChapterStarts(*mpls_, count(), diags);
+    if (ch.ok) {
+        chapterMode_ = true;
+        mplsMainCount_ = 1;
+        mplsClipName_ = ch.clip;
+        // 章节模式下集间黑场/ED 空白是常态（死后文实测集间 1~2.5 分钟），
+        // C2 空档阈值放宽到 5 分钟，否则每条集界都误报
+        options_.boundaryGapThreshold = 5 * 6000;
+        for (int i = 0; i < count(); ++i) {
+            Entry& e = entries_[size_t(i)];
+            e.offset = ch.offsets[i];
+            e.mplsEnd = ch.episodeEnds[i];
+            e.source = EpisodeInput::OffsetSource::Chapter;
+        }
+        mplsDiags_.push_back(Diagnostic::make(
+            DiagLevel::Info, DiagCode::MplsUnsupported,
+            QStringLiteral("章节模式：已按章节建议每集起点（来源列标\"章节\"），"
+                           "请在偏移列逐集核对后导出；导出文件名建议与 m2ts "
+                           "同名（%1.ass），放入 STREAM 后直接打开 m2ts 挂载")
+                .arg(ch.clip)));
+        for (const Diagnostic& d : diags)
+            mplsDiags_.push_back(d);
+        return;
+    }
+
+    // 回落：PlayItem 映射（一集一项的规整盘 / GTO 长链 —— 阶段 3 既有行为）
     MplsMapping m = mapItemsToEpisodes(*mpls_, count(), mplsStartMain_, diags);
     mplsMainCount_ = m.mainItems.size();
     for (const Diagnostic& d : diags)
@@ -189,6 +220,9 @@ void Session::clearMpls()
     mplsDiags_.clear();
     mplsMainCount_ = 0;
     mplsStartMain_ = 0;
+    chapterMode_ = false;
+    mplsClipName_.clear();
+    options_.boundaryGapThreshold = 2 * 100;
     // 回落预填：全部行回到 Prefill 来源并连锁重算
     for (Entry& e : entries_) {
         e.source = EpisodeInput::OffsetSource::Prefill;
@@ -261,6 +295,11 @@ int Session::errorCount() const
 
 QString Session::suggestFileName() const
 {
+    // 章节模式（F07，v1.4）：与 m2ts 同名导出（00000.m2ts → 00000.ass，
+    // 实证惯例：死后文盘 STREAM 内即有前任持有者放置的同名外挂）
+    if (chapterMode_ && !mplsClipName_.isEmpty())
+        return mplsClipName_ + QStringLiteral(".ass");
+
     // [01-04]_merged.ass（集数范围来自 epnum；识别不全时退化为文件数）
     int first = -1, last = -1;
     bool ok = !entries_.isEmpty();

@@ -121,11 +121,20 @@ void MainWindow::buildUi()
 
     const auto applyMplsInfo = [this, mplsInfo, startSpin] {
         if (const MplsInfo* m = session_->mpls()) {
-            mplsInfo->setText(tr("已加载：%1 个 PlayItem，总时长 %2")
-                                  .arg(m->items.size())
-                                  .arg(formatCs(m->totalCs)));
-            startSpin->setRange(1, qMax(1, session_->mplsMainCount()));
-            startSpin->setEnabled(session_->mplsMainCount() > 0);
+            QString text = tr("已加载：%1 个 PlayItem，总时长 %2")
+                               .arg(m->items.size())
+                               .arg(formatCs(m->totalCs));
+            if (session_->mplsChapterMode()) {
+                // T8 章节模式：多集一个 m2ts，分集点来自章节；起始正片
+                // 是 PlayItem 映射的概念，此模式下无意义
+                text += tr("｜ 章节模式：已按章节建议分集点，请在偏移列核对");
+                startSpin->setRange(1, 1);
+                startSpin->setEnabled(false);
+            } else {
+                startSpin->setRange(1, qMax(1, session_->mplsMainCount()));
+                startSpin->setEnabled(session_->mplsMainCount() > 0);
+            }
+            mplsInfo->setText(text);
         } else {
             mplsInfo->setText(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
             startSpin->setRange(1, 1);

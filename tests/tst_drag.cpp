@@ -8,7 +8,11 @@
 #include <QtTest>
 
 #include "filelistmodel.hpp"
+#include "mplsfixture.hpp"
 #include "session.hpp"
+
+using suture::testfix::buildMpls;
+using suture::testfix::ticks;
 
 using namespace suture;
 
@@ -29,6 +33,8 @@ private slots:
     void reorderBottom();  // 第 1 行拖到末尾
     void samePlace();      // 原地松开 = 无操作
     void offsetEditFormats();  // 偏移列：三种时间写法 + 非法输入拒绝
+    void chapterModeEndToEnd();   // T8 集成：章节模式生效 + 同名导出 + C2 阈值
+    void chapterModeFallback();   // T8 集成：多正片项回落 PlayItem 映射
 };
 
 namespace {
@@ -154,6 +160,90 @@ void TestDrag::offsetEditFormats()
     QCOMPARE(fx.model.data(fx.model.index(1, FileListModel::ColSource),
                            Qt::DisplayRole).toString(),
              QStringLiteral("手动"));
+}
+
+namespace {
+// 造 count 个临时字幕文件并载入 session（文件名 [01] 式，集数可识别）
+void loadFakeSubs(Session& session, const QTemporaryDir& dir, int count)
+{
+    QList<QUrl> urls;
+    for (int i = 1; i <= count; ++i) {
+        const QString p = dir.filePath(
+            QStringLiteral("[%1].ass").arg(i, 2, 10, QChar(u'0')));
+        QFile f(p);
+        f.open(QIODevice::WriteOnly);
+        f.write(kAss);
+        f.close();
+        urls << QUrl::fromLocalFile(p);
+    }
+    session.addUrls(urls);
+}
+}  // namespace
+
+void TestDrag::chapterModeEndToEnd()
+{
+    QTemporaryDir dir;
+    Session session;
+    // 3 集 m2ts（00001.m2ts）：等分位恰为 0 / 24:00 / 48:00，
+    // 章节含 OP 签名（分集点 +90.09 秒）与噪声章节
+    const quint32 origin = ticks(600 * 100);
+    const QByteArray raw = buildMpls(
+        {{origin, origin + ticks(3 * 24 * 6000), 0, "00001"}},
+        {{1, 0, origin},
+         {1, 0, origin + ticks(70 * 100)},           // 噪声章节
+         {1, 0, origin + ticks(24 * 6000)},          // 第 2 集起点
+         {1, 0, origin + ticks(24 * 6000 + 9009)},   // 其 OP 结束（成对章节）
+         {1, 0, origin + ticks(35 * 6000)},          // 噪声章节
+         {1, 0, origin + ticks(48 * 6000)},          // 第 3 集起点
+         {1, 0, origin + ticks(48 * 6000 + 9009)}});
+    const QString mplsPath = dir.filePath(QStringLiteral("00000.mpls"));
+    QFile mf(mplsPath);
+    QVERIFY(mf.open(QIODevice::WriteOnly));
+    mf.write(raw);
+    mf.close();
+
+    loadFakeSubs(session, dir, 3);
+    QString err;
+    QVERIFY(session.loadMplsFile(mplsPath, &err));
+    QVERIFY(session.mplsChapterMode());
+    QCOMPARE(session.mplsClipName(), QStringLiteral("00001"));
+    // 偏移 = 章节建议；来源与导出名（F07：与 m2ts 同名）
+    QCOMPARE(session.entry(0).offset, Cs(0));
+    QCOMPARE(session.entry(1).offset, Cs(24 * 6000));
+    QCOMPARE(session.entry(2).offset, Cs(48 * 6000));
+    QCOMPARE(session.entry(0).source, EpisodeInput::OffsetSource::Chapter);
+    QCOMPARE(session.suggestFileName(), QStringLiteral("00001.ass"));
+    // C2 空档阈值（章节模式 5 分钟）：字幕 23:00 结束 vs 下集起点 24:00
+    // 的 1 分钟空档不应告警（PlayItem 模式的 2 秒口径会误报）
+    QCOMPARE(session.entry(0).mplsEnd.value_or(Cs(-1)), Cs(24 * 6000));
+    for (const Diagnostic& d : session.allDiags())
+        QVERIFY2(d.code != DiagCode::BoundaryGap, qPrintable(d.message));
+}
+
+void TestDrag::chapterModeFallback()
+{
+    QTemporaryDir dir;
+    Session session;
+    // 两个正片项（一集一项的规整盘型）→ 章节模式不适用，回落 PlayItem 映射
+    const QByteArray raw = buildMpls({
+        {0, ticks(24 * 6000), 0, "00002"},
+        {0, ticks(25 * 6000), 0, "00003"},
+    });
+    const QString mplsPath = dir.filePath(QStringLiteral("00001.mpls"));
+    QFile mf(mplsPath);
+    QVERIFY(mf.open(QIODevice::WriteOnly));
+    mf.write(raw);
+    mf.close();
+
+    loadFakeSubs(session, dir, 2);
+    QString err;
+    QVERIFY(session.loadMplsFile(mplsPath, &err));
+    QVERIFY(!session.mplsChapterMode());
+    // 阶段 3 既有行为不变：累计偏移 + MPLS 来源 + 集数范围命名
+    QCOMPARE(session.entry(0).offset, Cs(0));
+    QCOMPARE(session.entry(1).offset, Cs(24 * 6000));
+    QCOMPARE(session.entry(1).source, EpisodeInput::OffsetSource::Mpls);
+    QCOMPARE(session.suggestFileName(), QStringLiteral("[01-02]_merged.ass"));
 }
 
 QTEST_MAIN(TestDrag)

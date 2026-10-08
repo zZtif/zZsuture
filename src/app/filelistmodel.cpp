@@ -66,6 +66,7 @@ QVariant FileListModel::data(const QModelIndex& idx, int role) const
     case ColSource:
         switch (e.source) {
         case EpisodeInput::OffsetSource::Mpls:    return QStringLiteral("MPLS");
+        case EpisodeInput::OffsetSource::Chapter: return QStringLiteral("章节");
         case EpisodeInput::OffsetSource::Manual:  return QStringLiteral("手动");
         case EpisodeInput::OffsetSource::Adjusted:return QStringLiteral("调整");
         default:                                  return QStringLiteral("预填");

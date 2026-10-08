@@ -89,7 +89,7 @@ struct EpisodeInput {
     Cs      offset = 0;
     quint64 fileId = 0;   // 装载时分配的稳定文件 ID（微调绑定用，与列表位置无关）
     std::optional<Cs> mplsEnd;   // 该集 MPLS 出点（绝对时刻；C1 交叉验证用）
-    enum class OffsetSource { Mpls, Manual, Prefill, Adjusted };
+    enum class OffsetSource { Mpls, Manual, Prefill, Adjusted, Chapter };
     OffsetSource offsetSource = OffsetSource::Prefill;
 };
 
@@ -101,6 +101,9 @@ struct LineAdjustment {   // F06 单行微调：也是参数，不是修改（D7
 
 struct MergeOptions {
     Cs globalShift = 0;                 // F06 全局微调
+    // C2 空档阈值：预填/PlayItem 模式下无缝连播应为 0（默认 2 秒）；章节模式
+    // 的集间黑场/ED 空白是常态，由 Session 切为 5 分钟（T8 场景差异化）
+    Cs boundaryGapThreshold = 2 * 100;
     QList<LineAdjustment> adjustments;  // F06 逐行微调
     // S4 六字段决议（默认取第一个文件值，UI 可改）
     QString resolvedWrapStyle, resolvedSbs, resolvedYcbcr;
