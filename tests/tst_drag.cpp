@@ -39,6 +39,8 @@ private slots:
     void orderMismatchWarning();  // T10：拖动致乱序 → 告警不静默改序
     void missingEpisodeWarning(); // T10：集数有洞 → 缺集告警
     void chapterPrefillDivergence(); // T8 修正：章节建议与预填背离 → 告警
+    void breakpointShiftSession();   // T11：Session 分段校正（推荐点+生效）
+    void calibrateSession();         // T11：实测校准算术
 };
 
 namespace {
@@ -211,17 +213,31 @@ void TestDrag::chapterModeEndToEnd()
     QVERIFY(session.loadMplsFile(mplsPath, &err));
     QVERIFY(session.mplsChapterMode());
     QCOMPARE(session.mplsClipName(), QStringLiteral("00001"));
-    // 偏移 = 章节建议；来源与导出名（F07：与 m2ts 同名）
+    // v1.4.2 降级：加载只解析与建议，偏移保持预填（预测只建议、永不自动生效）
+    QVERIFY(session.mplsSuggestionAvailable());
+    QCOMPARE(session.entry(1).offset, Cs(23 * 6000));   // 预填 = 第 1 集 maxEnd
+    QCOMPARE(session.entry(1).source, EpisodeInput::OffsetSource::Prefill);
+    // 显式应用后：偏移 = 章节建议；来源与导出名（F07：与 m2ts 同名）
+    QVERIFY(session.applyMplsSuggestion());
     QCOMPARE(session.entry(0).offset, Cs(0));
     QCOMPARE(session.entry(1).offset, Cs(24 * 6000));
     QCOMPARE(session.entry(2).offset, Cs(48 * 6000));
     QCOMPARE(session.entry(0).source, EpisodeInput::OffsetSource::Chapter);
     QCOMPARE(session.suggestFileName(), QStringLiteral("00001.ass"));
-    // C2 空档阈值（章节模式 5 分钟）：字幕 23:00 结束 vs 下集起点 24:00
+    // C2 空档阈值（应用后 5 分钟）：字幕 23:00 结束 vs 下集起点 24:00
     // 的 1 分钟空档不应告警（PlayItem 模式的 2 秒口径会误报）
     QCOMPARE(session.entry(0).mplsEnd.value_or(Cs(-1)), Cs(24 * 6000));
     for (const Diagnostic& d : session.allDiags())
         QVERIFY2(d.code != DiagCode::BoundaryGap, qPrintable(d.message));
+    // 结构性变化（移动行）后：已应用的建议回落预填 + 告警
+    session.moveRows(0, 1, 3);
+    QCOMPARE(session.entry(0).source, EpisodeInput::OffsetSource::Prefill);
+    bool hasResetWarn = false;
+    for (const Diagnostic& d : session.allDiags())
+        if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported
+            && d.message.contains(QStringLiteral("回落")))
+            hasResetWarn = true;
+    QVERIFY(hasResetWarn);
 }
 
 void TestDrag::chapterModeFallback()
@@ -243,7 +259,9 @@ void TestDrag::chapterModeFallback()
     QString err;
     QVERIFY(session.loadMplsFile(mplsPath, &err));
     QVERIFY(!session.mplsChapterMode());
-    // 阶段 3 既有行为不变：累计偏移 + MPLS 来源 + 集数范围命名
+    // v1.4.2：加载不改偏移（预填），显式应用后走 PlayItem 建议路径
+    QCOMPARE(session.entry(1).source, EpisodeInput::OffsetSource::Prefill);
+    QVERIFY(session.applyMplsSuggestion());
     QCOMPARE(session.entry(0).offset, Cs(0));
     QCOMPARE(session.entry(1).offset, Cs(24 * 6000));
     QCOMPARE(session.entry(1).source, EpisodeInput::OffsetSource::Mpls);
@@ -371,6 +389,7 @@ void TestDrag::chapterPrefillDivergence()
     QString err;
     QVERIFY(session.loadMplsFile(mplsPath, &err));
     QVERIFY(session.mplsChapterMode());
+    QVERIFY(session.applyMplsSuggestion());             // v1.4.2：显式应用
     QCOMPARE(session.entry(1).offset, Cs(24 * 6000));   // ED 锚定结果
     bool hasDiverge = false;
     for (const Diagnostic& d : session.allDiags())
@@ -378,6 +397,43 @@ void TestDrag::chapterPrefillDivergence()
             && d.fileIndex == 1 && d.message.contains(QStringLiteral("相差")))
             hasDiverge = true;
     QVERIFY(hasDiverge);
+}
+
+void TestDrag::breakpointShiftSession()
+{
+    Fixture fx;   // 4 个文件，事件 0:00:01.00→0:23:00.00（maxEnd 23min）
+    // 推荐时间点 = 各集边界（预填下 = 23/46/69 分钟处）
+    const QList<Cs> bounds = fx.session.episodeBoundaries();
+    QCOMPARE(bounds.size(), 3);
+    QCOMPARE(bounds[0], Cs(23 * 6000));
+    QCOMPARE(bounds[1], Cs(46 * 6000));
+    QCOMPARE(bounds[2], Cs(69 * 6000));
+
+    // 在第 1 个边界插 +3.5 秒黑场：第 2 集起的行被推开，第 1 集不动
+    QList<BreakpointShift> bps;
+    bps.append({bounds[0], Cs(350)});
+    fx.session.setBreakpointShifts(bps);
+    const MergeResult* r = fx.session.result();
+    QVERIFY(r);
+    // events: [EP1标记, ep1行, EP2标记, ep2行, ...]
+    QCOMPARE(r->merged.events[0].start, Cs(0));            // EP1 标记不动
+    QCOMPARE(r->merged.events[1].start, Cs(100));          // ep1 首行不动
+    QCOMPARE(r->merged.events[2].start, Cs(23 * 6000 + 350));   // EP2 标记后移
+    QCOMPARE(r->merged.events[3].start, Cs(23 * 6000 + 100 + 350));   // ep2 首行后移
+    // 清空恢复
+    fx.session.setBreakpointShifts({});
+    QCOMPARE(fx.session.result()->merged.events[3].start, Cs(23 * 6000 + 100));
+}
+
+void TestDrag::calibrateSession()
+{
+    Fixture fx;
+    // 播放器实测：第 2 集首句出现在 25:00.00 → 偏移 = 25:00 − 0:01 = 24:59
+    QCOMPARE(fx.session.firstContentStart(1), Cs(100));
+    const Cs off = fx.session.calibrateToObserved(1, Cs(25 * 6000));
+    QCOMPARE(off, Cs(25 * 6000 - 100));
+    QCOMPARE(fx.session.entry(1).offset, Cs(25 * 6000 - 100));
+    QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Manual);
 }
 
 QTEST_MAIN(TestDrag)

@@ -28,6 +28,8 @@ private:
     void exportMerged();
     void refreshDiags();
     void refreshStatus();
+    void openBreakpointDialog();   // T11：时间点累积校正
+    void openCalibrateDialog();    // T11：按播放器实测时刻校准某集偏移
 
     Session*      session_;
     FileListModel* fileModel_;

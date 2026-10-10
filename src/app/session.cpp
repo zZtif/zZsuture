@@ -52,7 +52,7 @@ void Session::addUrls(const QList<QUrl>& urls)
                      });
     // 偏移来源优先级：MPLS 生效则重新映射（集数可能变了），否则预填
     if (mpls_)
-        applyMplsMapping();
+        analyzeMpls();
     else
         recomputePrefill();
     checkEpisodeOrder();
@@ -70,7 +70,7 @@ void Session::removeRows(const QList<int>& rows)
             entries_.erase(entries_.begin() + r);
     }
     if (mpls_)
-        applyMplsMapping();
+        analyzeMpls();
     else
         recomputePrefill();
     checkEpisodeOrder();
@@ -95,7 +95,7 @@ void Session::moveRows(int srcRow, int count_, int destRow)
     for (int i = 0; i < count_; ++i)
         entries_.insert(entries_.begin() + insertAt + i, std::move(moved[size_t(i)]));
     if (mpls_)
-        applyMplsMapping();
+        analyzeMpls();
     else
         recomputePrefill();
     checkEpisodeOrder();
@@ -191,20 +191,41 @@ void Session::recomputePrefill()
     }
 }
 
-void Session::applyMplsMapping()
+void Session::analyzeMpls()
 {
-    // MPLS 生效期间全部行来源切换（架构 §5.9：拖入 MPLS 后覆盖预填）。
-    // 超出正片总数时 mapItemsToEpisodes 发告警并保持现有偏移（手动兜底）。
+    // v1.4.2（所有者裁定）：MPLS 只解析与建议，**不改偏移**——偏移默认恒为
+    // 预填；建议值与依据列于告警面板，应用是显式动作（applyMplsSuggestion）。
     mplsDiags_.clear();
+    chapterSuggestion_.reset();
+    playItemSuggestion_.reset();
     mplsMainCount_ = 0;
     chapterMode_ = false;
     mplsClipName_.clear();
-    options_.boundaryGapThreshold = 2 * 100;   // PlayItem/预填模式：无缝连播口径
+
+    // 结构性变化（增/删/移）后，此前显式应用过的建议已与列表脱节：
+    // 回落预填并告警，不静默沿用可能错位的旧值
+    bool hadApplied = false;
+    for (Entry& e : entries_) {
+        if (e.source == EpisodeInput::OffsetSource::Chapter ||
+            e.source == EpisodeInput::OffsetSource::Mpls) {
+            hadApplied = true;
+            e.source = EpisodeInput::OffsetSource::Prefill;
+            e.mplsEnd.reset();
+        }
+    }
+    if (hadApplied) {
+        recomputePrefill();
+        mplsDiags_.push_back(Diagnostic::make(
+            DiagLevel::Warning, DiagCode::MplsUnsupported,
+            QStringLiteral("文件列表已变化，此前应用的 MPLS/章节偏移已回落"
+                           "预填——请重新核对或再次应用建议")));
+    }
+
     if (!mpls_)
         return;
     std::vector<Diagnostic> diags;
 
-    // 优先：章节模式（T8，v1.4 场景）——恰一个正片 PlayItem（多集一个 m2ts）
+    // 优先：章节建议（T8，v1.4 场景）——恰一个正片 PlayItem（多集一个 m2ts）
     QList<Cs> subEd;   // 每集字幕 ED 起点（T8 修正：ED 锚定）
     for (const Entry& e : entries_)
         subEd.append(detectEdStartCs(*e.doc));
@@ -213,15 +234,14 @@ void Session::applyMplsMapping()
         chapterMode_ = true;
         mplsMainCount_ = 1;
         mplsClipName_ = ch.clip;
-        // 章节模式下集间黑场/ED 空白是常态（死后文实测集间 1~2.5 分钟），
-        // C2 空档阈值放宽到 5 分钟，否则每条集界都误报
-        options_.boundaryGapThreshold = 5 * 6000;
-        for (int i = 0; i < count(); ++i) {
-            Entry& e = entries_[size_t(i)];
-            e.offset = ch.offsets[i];
-            e.mplsEnd = ch.episodeEnds[i];
-            e.source = EpisodeInput::OffsetSource::Chapter;
-        }
+        chapterSuggestion_ = ch;
+        mplsDiags_.push_back(Diagnostic::make(
+            DiagLevel::Info, DiagCode::MplsUnsupported,
+            QStringLiteral("多集一个 m2ts（%1）：已按章节算出每集起点参考值——"
+                           "预填未改动，确认后点\"应用建议偏移\"；导出文件名"
+                           "建议与 m2ts 同名（%1.ass）").arg(ch.clip)));
+        for (const Diagnostic& d : diags)
+            mplsDiags_.push_back(d);
         // 预填交叉核对（T2 洞察的安全网）：连续切割的字幕自带分集信息
         // （黑契/死后文实测预填误差仅 0.05/2.3 秒）。章节建议与预填大幅
         // 背离 = 大概率建议错了——死后文实测 bug（建议吸到 OP 起点、偏晚
@@ -235,40 +255,116 @@ void Session::applyMplsMapping()
             constexpr Cs kPrefillDivergeCs = 15 * 100;
             for (int k = 1; k < count(); ++k) {
                 if (qAbs(ch.offsets[k] - prefill[k]) > kPrefillDivergeCs)
-                    diags.push_back(Diagnostic::make(
+                    mplsDiags_.push_back(Diagnostic::make(
                         DiagLevel::Warning, DiagCode::MplsUnsupported,
                         QStringLiteral("第 %1 集章节建议 %2 与字幕连续预填 %3 "
-                                       "相差 %4 秒——两者应接近，请逐集核对"
-                                       "（预填=上一集字幕最晚结束）")
+                                       "相差 %4 秒——两者应接近，应用前请逐集"
+                                       "核对（预填=上一集字幕最晚结束）")
                             .arg(k + 1).arg(formatCs(ch.offsets[k]))
                             .arg(formatCs(prefill[k]))
                             .arg(qAbs(ch.offsets[k] - prefill[k]) / 100), k));
             }
         }
-        mplsDiags_.push_back(Diagnostic::make(
-            DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("章节模式：已按章节建议每集起点（来源列标\"章节\"），"
-                           "请在偏移列逐集核对后导出；导出文件名建议与 m2ts "
-                           "同名（%1.ass），放入 STREAM 后直接打开 m2ts 挂载")
-                .arg(ch.clip)));
-        for (const Diagnostic& d : diags)
-            mplsDiags_.push_back(d);
         return;
     }
 
-    // 回落：PlayItem 映射（一集一项的规整盘 / GTO 长链 —— 阶段 3 既有行为）
+    // 兜底：PlayItem 映射建议（一集一项的规整盘 / GTO 长链）
     MplsMapping m = mapItemsToEpisodes(*mpls_, count(), mplsStartMain_, diags);
     mplsMainCount_ = m.mainItems.size();
     for (const Diagnostic& d : diags)
         mplsDiags_.push_back(d);
-    if (!m.ok)
-        return;
-    for (int i = 0; i < count(); ++i) {
-        Entry& e = entries_[size_t(i)];
-        e.offset = m.offsets[i];
-        e.mplsEnd = m.episodeEnds[i];
-        e.source = EpisodeInput::OffsetSource::Mpls;
+    if (m.ok)
+        playItemSuggestion_ = m;
+}
+
+bool Session::mplsSuggestionAvailable() const
+{
+    return chapterSuggestion_.has_value() || playItemSuggestion_.has_value();
+}
+
+bool Session::applyMplsSuggestion()
+{
+    if (chapterSuggestion_.has_value()) {
+        const ChapterMapping& ch = *chapterSuggestion_;
+        // 章节偏移下集间黑场/ED 空白是常态（死后文实测 1~2.5 分钟），
+        // C2 空档阈值放宽到 5 分钟
+        options_.boundaryGapThreshold = 5 * 6000;
+        for (int i = 0; i < count(); ++i) {
+            Entry& e = entries_[size_t(i)];
+            e.offset = ch.offsets[i];
+            e.mplsEnd = ch.episodeEnds[i];
+            e.source = EpisodeInput::OffsetSource::Chapter;
+        }
+        mplsDiags_.push_back(Diagnostic::make(
+            DiagLevel::Info, DiagCode::MplsUnsupported,
+            QStringLiteral("已应用章节建议偏移（来源列标\"章节\"）——请逐集"
+                           "核对，不对的双击偏移列修改")));
+        remerge();
+        emit paramsChanged();
+        emit resultChanged();
+        return true;
     }
+    if (playItemSuggestion_.has_value()) {
+        const MplsMapping& m = *playItemSuggestion_;
+        for (int i = 0; i < count(); ++i) {
+            Entry& e = entries_[size_t(i)];
+            e.offset = m.offsets[i];
+            e.mplsEnd = m.episodeEnds[i];
+            e.source = EpisodeInput::OffsetSource::Mpls;
+        }
+        mplsDiags_.push_back(Diagnostic::make(
+            DiagLevel::Info, DiagCode::MplsUnsupported,
+            QStringLiteral("已应用 PlayItem 建议偏移（来源列标\"MPLS\"）——"
+                           "请逐集核对")));
+        remerge();
+        emit paramsChanged();
+        emit resultChanged();
+        return true;
+    }
+    return false;
+}
+
+void Session::setBreakpointShifts(const QList<BreakpointShift>& bps)
+{
+    options_.breakpointShifts = bps;
+    remerge();
+    emit paramsChanged();
+    emit resultChanged();
+}
+
+QList<Cs> Session::episodeBoundaries() const
+{
+    // 各集字幕结束的基础时刻（T11 推荐时间点）：偏移+全局+该集 maxEnd。
+    // 不含已填增量（基础坐标）——叠加显示由对话框负责
+    QList<Cs> out;
+    for (int i = 0; i + 1 < count(); ++i) {
+        const Entry& e = entries_[size_t(i)];
+        out.append(e.offset + options_.globalShift + e.doc->maxDialogueEnd);
+    }
+    return out;
+}
+
+Cs Session::firstContentStart(int row) const
+{
+    if (row < 0 || row >= count())
+        return 0;
+    Cs best = -1;
+    for (const EventLine& ev : entries_[size_t(row)].doc->events) {
+        if (ev.isComment || ev.zeroDuration())
+            continue;
+        if (best < 0 || ev.start < best)
+            best = ev.start;
+    }
+    return best < 0 ? 0 : best;
+}
+
+Cs Session::calibrateToObserved(int row, Cs observedCs)
+{
+    // 实测校准（T11 人工主线）：observed = 该集首句内容在播放器中的实际
+    // 时刻（用户读数），新偏移 = observed − 该集最早内容时刻
+    const Cs off = observedCs - firstContentStart(row);
+    setOffset(row, off);
+    return off;
 }
 
 bool Session::loadMplsFile(const QString& path, QString* errMsg)
@@ -290,7 +386,7 @@ bool Session::loadMplsFile(const QString& path, QString* errMsg)
     mpls_ = *out.info;
     mplsStartMain_ = 0;   // 新文件从第 1 个正片开始
     mplsDiags_ = QList<Diagnostic>(out.diags.begin(), out.diags.end());
-    applyMplsMapping();
+    analyzeMpls();
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -305,6 +401,8 @@ void Session::clearMpls()
     mplsStartMain_ = 0;
     chapterMode_ = false;
     mplsClipName_.clear();
+    chapterSuggestion_.reset();
+    playItemSuggestion_.reset();
     options_.boundaryGapThreshold = 2 * 100;
     // 回落预填：全部行回到 Prefill 来源并连锁重算
     for (Entry& e : entries_) {
@@ -322,7 +420,7 @@ void Session::setMplsStartMain(int startMain)
     if (startMain < 0 || startMain == mplsStartMain_ || !mpls_)
         return;
     mplsStartMain_ = startMain;
-    applyMplsMapping();
+    analyzeMpls();
     remerge();
     emit structureChanged();
     emit resultChanged();
