@@ -16,6 +16,8 @@ namespace {
 // ASS 特效标签 \rStyleName 在 Text 内部按名引用样式（卡拉OK 二段着色常用）。
 // 只重写指向"本文件已定义样式"的名字；裸 \r（重置为本行样式）与未定义名字不动。
 // 匹配规则：\r 之后直到 '}' 或 '\' 的连续字符视为样式名。
+// S3 修正（2026-10-10）：带星号引用 \r*X 同样按去星号回退（老工具链怪癖，
+// 与事件行 Style 字段同一处理，见事件循环处注释）。
 int rewriteRTags(QString& text, const QHash<QString, QString>& renameMap)
 {
     static const QRegularExpression re(QStringLiteral("\\\\r([^\\\\}]*)"));
@@ -24,10 +26,18 @@ int rewriteRTags(QString& text, const QHash<QString, QString>& renameMap)
     QRegularExpressionMatch m;
     while ((m = re.match(text, from)).hasMatch()) {
         const QString name = m.captured(1);
-        const auto it = renameMap.constFind(name);
+        QString mapped;
+        auto it = renameMap.constFind(name);
         if (it != renameMap.constEnd()) {
-            text.replace(m.capturedStart(1), name.size(), *it);
-            from = m.capturedStart(1) + it->size();
+            mapped = *it;
+        } else if (name.startsWith(u'*')) {
+            const auto it2 = renameMap.constFind(name.mid(1));
+            if (it2 != renameMap.constEnd())
+                mapped = *it2;
+        }
+        if (!mapped.isEmpty()) {
+            text.replace(m.capturedStart(1), name.size(), mapped);
+            from = m.capturedStart(1) + mapped.size();
             ++rewritten;
         } else {
             from = m.capturedEnd(0);
@@ -214,6 +224,7 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
 
     // ---------- 4. 事件重写 + 平移 + 拼接 ----------
     QHash<QPair<int, QString>, int> undefinedRefCount;   // S3 按 (文件,样式名) 去重
+    QHash<QPair<int, QString>, int> starFixCount;   // S3 修正：*X → X 按去重计数
     int rTagTotal = 0;
     for (int i = 0; i < episodes.size(); ++i) {
         const EpisodeInput& ep = episodes[i];
@@ -236,9 +247,16 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
 
         for (int e = 0; e < int(ep.doc->events.size()); ++e) {
             EventLine ev = ep.doc->events[size_t(e)];
-            // 样式引用重写（S3：未定义引用原样保留）
+            // 样式引用重写（S3）。星号回退（2026-10-10 升级）：引用 *X 未定义
+            // 而该文件定义了 X → 修正为 X——老 SSA 工具链星号怪癖（实证：死后文
+            // 2008 年 ep2-5 引用 *Default/*ed_chi/*ed_jpn，表内定义不带星号），
+            // 播放器遇未定义样式回退自身默认 → 字体变小跑左下角，原样保留的
+            // 后果不可接受。修正后走正常隔离改名，Warning 留痕。
             if (map.contains(ev.style)) {
                 ev.style = map.value(ev.style);
+            } else if (ev.style.startsWith(u'*') && map.contains(ev.style.mid(1))) {
+                ++starFixCount[{i, ev.style}];
+                ev.style = map.value(ev.style.mid(1));
             } else if (!ev.style.isEmpty()) {
                 ++undefinedRefCount[{i, ev.style}];
             }
@@ -260,6 +278,17 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
             QStringLiteral("第 %1 个文件有 %2 行引用未定义样式 \"%3\"，"
                            "已原样保留（与源文件播放行为一致）")
                 .arg(it.key().first + 1).arg(it.value()).arg(it.key().second),
+            it.key().first));
+    }
+    for (auto it = starFixCount.constBegin();
+         it != starFixCount.constEnd(); ++it) {
+        diags.push_back(Diagnostic::make(
+            DiagLevel::Warning, DiagCode::UndefinedStyleRef,
+            QStringLiteral("第 %1 个文件有 %2 行引用未定义样式 \"%3\"（带星号），"
+                           "已按同名样式 \"%4\" 修正——老工具链星号怪癖，"
+                           "不修正播放器会回退默认样式（字体变小/位置跑偏）")
+                .arg(it.key().first + 1).arg(it.value())
+                .arg(it.key().second, it.key().second.mid(1)),
             it.key().first));
     }
     if (rTagTotal > 0)
