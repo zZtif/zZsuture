@@ -1,10 +1,14 @@
 #include "mainwindow.hpp"
 
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
-#include <QDoubleSpinBox>
 #include <QDropEvent>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -16,6 +20,8 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTableView>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -99,10 +105,12 @@ void MainWindow::buildUi()
     pathRow->addWidget(mplsPath, 1);
     pathRow->addWidget(browseBtn);
     mv->addLayout(pathRow);
-    auto* parseBtn = new QPushButton(tr("解析并应用"));
-    auto* clearMplsBtn = new QPushButton(tr("清除 MPLS（回落预填）"));
+    auto* parseBtn = new QPushButton(tr("解析"));
+    auto* applySuggestBtn = new QPushButton(tr("应用建议偏移"));
+    auto* clearMplsBtn = new QPushButton(tr("清除 MPLS"));
     auto* btnRow = new QHBoxLayout;
     btnRow->addWidget(parseBtn);
+    btnRow->addWidget(applySuggestBtn);
     btnRow->addWidget(clearMplsBtn);
     mv->addLayout(btnRow);
     // 起始正片选择（整季连播链只合并中间几集的场景，实证：GTO 44 集链）
@@ -119,15 +127,16 @@ void MainWindow::buildUi()
     mv->addWidget(mplsInfo);
     pv->addWidget(mplsBox);
 
-    const auto applyMplsInfo = [this, mplsInfo, startSpin] {
+    const auto applyMplsInfo = [this, mplsInfo, startSpin, applySuggestBtn] {
+        applySuggestBtn->setEnabled(session_->mplsSuggestionAvailable());
         if (const MplsInfo* m = session_->mpls()) {
-            QString text = tr("已加载：%1 个 PlayItem，总时长 %2")
+            QString text = tr("已解析：%1 个 PlayItem，总时长 %2")
                                .arg(m->items.size())
                                .arg(formatCs(m->totalCs));
             if (session_->mplsChapterMode()) {
-                // T8 章节模式：多集一个 m2ts，分集点来自章节；起始正片
-                // 是 PlayItem 映射的概念，此模式下无意义
-                text += tr("｜ 章节模式：已按章节建议分集点，请在偏移列核对");
+                // v1.4.2：多集一个 m2ts 只给参考值（告警面板），应用是显式动作；
+                // 起始正片是 PlayItem 映射的概念，此模式下无意义
+                text += tr("｜ 分集点参考值见告警面板");
                 startSpin->setRange(1, 1);
                 startSpin->setEnabled(false);
             } else {
@@ -172,6 +181,10 @@ void MainWindow::buildUi()
         session_->clearMpls();
         applyMplsInfo();
     });
+    connect(applySuggestBtn, &QPushButton::clicked, this, [this] {
+        // v1.4.2 原则：应用是显式动作（预测只建议、永不自动生效）
+        session_->applyMplsSuggestion();
+    });
 
     auto* tuneBox = new QGroupBox(tr("全局微调"));
     auto* tv = new QHBoxLayout(tuneBox);
@@ -187,6 +200,21 @@ void MainWindow::buildUi()
     tv->addWidget(new QLabel(tr("所有字幕")));
     tv->addWidget(shiftSpin);
     pv->addWidget(tuneBox);
+
+    // T11 校正工具（v1.4.2 人工主线）
+    auto* calibBox = new QGroupBox(tr("校正工具"));
+    auto* cv = new QVBoxLayout(calibBox);
+    auto* bpBtn = new QPushButton(tr("分段校正…"));
+    auto* obsBtn = new QPushButton(tr("实测校准…"));
+    connect(bpBtn, &QPushButton::clicked, this, &MainWindow::openBreakpointDialog);
+    connect(obsBtn, &QPushButton::clicked, this, &MainWindow::openCalibrateDialog);
+    cv->addWidget(bpBtn);
+    cv->addWidget(obsBtn);
+    auto* calibHint = new QLabel(tr("分段校正：在时间点插入黑屏/转场增量\n"
+                                    "实测校准：读播放器时刻，工具算偏移"));
+    calibHint->setWordWrap(true);
+    cv->addWidget(calibHint);
+    pv->addWidget(calibBox);
 
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
     connect(removeBtn, &QPushButton::clicked, this, [this] {
@@ -324,6 +352,163 @@ void MainWindow::refreshStatus()
         tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4  ｜ 构建 %5")
             .arg(session_->count()).arg(err).arg(warn).arg(info)
             .arg(QString::fromLatin1(kBuildStamp)));
+}
+
+void MainWindow::openBreakpointDialog()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("分段校正（时间点累积）"));
+    dlg.resize(420, 340);
+    auto* lay = new QVBoxLayout(&dlg);
+    auto* hint = new QLabel(tr(
+        "从每个时间点起，其后所有字幕平移该增量（逐点累加，可负）。\n"
+        "时间点已按各集字幕结束预填；填入增量后下方时间点自动重算。\n"
+        "也可改时间点或添加任意时刻（如某集 OP/ED 起点）。删行 = 清空该行增量。"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+
+    auto* table = new QTableWidget;
+    table->setColumnCount(2);
+    table->setHorizontalHeaderLabels({tr("时间点"), tr("增量(秒)")});
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->verticalHeader()->setVisible(false);
+    lay->addWidget(table);
+
+    auto* addRowBtn = new QPushButton(tr("添加时间点"));
+    lay->addWidget(addRowBtn);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    lay->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, this, [&dlg, table, this] {
+        // 逐行解析：时间点宽容解析（0:23:41.69 / 23:41.69 / 秒数均可）
+        QList<BreakpointShift> bps;
+        for (int r = 0; r < table->rowCount(); ++r) {
+            const auto* timeItem = table->item(r, 0);
+            auto* spin = qobject_cast<QDoubleSpinBox*>(table->cellWidget(r, 1));
+            if (!timeItem || !spin)
+                continue;
+            const auto cs = parseTimeToCs(timeItem->text());
+            if (!cs.has_value()) {
+                QMessageBox::warning(&dlg, tr("分段校正"),
+                                     tr("第 %1 行的时间点无法解析（支持"
+                                        " 0:23:41.69 / 23:41.69 / 纯秒数）")
+                                         .arg(r + 1));
+                return;
+            }
+            if (std::llround(spin->value() * 100.0) == 0)
+                continue;   // 零增量行不保存
+            BreakpointShift b;
+            b.at = *cs;
+            b.delta = Cs(std::llround(spin->value() * 100.0));
+            bps.append(b);
+        }
+        session_->setBreakpointShifts(bps);
+        dlg.accept();
+    });
+
+    // 行构造：建议行 = 各集边界（基础坐标 + 上方已填增量实时重算）；
+    // 重开对话框时恢复已保存的增量（按行序对应，超出的建议行增量 0）
+    const QList<Cs> bases = session_->episodeBoundaries();
+    const QList<BreakpointShift> saved = session_->breakpointShifts();
+    const int rows = std::max(int(bases.size()), int(saved.size())) + 0;
+    QVector<bool> manual(rows, false);   // 用户改过的时间点不再自动重算
+    bool updating = false;               // 程序写单元格时不记为 manual
+
+    const auto recomputeSuggested = [table, &bases, &manual, &updating]() {
+        if (updating || bases.isEmpty())
+            return;
+        updating = true;
+        Cs cum = 0;
+        for (int r = 0; r < int(bases.size()); ++r) {
+            if (!manual[r]) {
+                auto* it = table->item(r, 0);
+                if (it)
+                    it->setText(formatCs(bases[r] + cum));
+            }
+            if (const auto* spin = qobject_cast<QDoubleSpinBox*>(table->cellWidget(r, 1)))
+                cum += Cs(std::llround(spin->value() * 100.0));
+        }
+        updating = false;
+    };
+
+    for (int r = 0; r < rows; ++r) {
+        auto* timeItem = new QTableWidgetItem;
+        timeItem->setText(r < int(bases.size()) ? formatCs(bases[r]) : QString());
+        table->setItem(r, 0, timeItem);
+        auto* spin = new QDoubleSpinBox;
+        spin->setRange(-36000.0, 36000.0);
+        spin->setDecimals(2);
+        if (r < int(saved.size()))
+            spin->setValue(double(saved[r].delta) / 100.0);
+        table->setCellWidget(r, 1, spin);
+        connect(spin, &QDoubleSpinBox::valueChanged, this,
+                [recomputeSuggested](double) { recomputeSuggested(); });
+    }
+    connect(table, &QTableWidget::itemChanged, this, [&manual, &updating](QTableWidgetItem* it) {
+        if (!updating && it && it->column() == 0)
+            manual[it->row()] = true;   // 用户改过的时间点不再自动重算
+    });
+    connect(addRowBtn, &QPushButton::clicked, this, [table, &dlg]() {
+        const int r = table->rowCount();
+        table->insertRow(r);
+        table->setItem(r, 0, new QTableWidgetItem);
+        auto* spin = new QDoubleSpinBox;
+        spin->setRange(-36000.0, 36000.0);
+        spin->setDecimals(2);
+        table->setCellWidget(r, 1, spin);
+        table->setCurrentCell(r, 0);
+        Q_UNUSED(dlg)
+    });
+
+    dlg.exec();
+}
+
+void MainWindow::openCalibrateDialog()
+{
+    if (session_->count() == 0) {
+        QMessageBox::information(this, tr("实测校准"), tr("请先拖入字幕文件。"));
+        return;
+    }
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("实测校准"));
+    auto* lay = new QVBoxLayout(&dlg);
+    auto* hint = new QLabel(tr(
+        "在播放器中找到某集第一句台词实际出现的时刻，填到下面——\n"
+        "工具会算出该集偏移 = 实测时刻 − 该集字幕首行时刻。"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+
+    auto* form = new QFormLayout;
+    auto* epCombo = new QComboBox;
+    for (int i = 0; i < session_->count(); ++i)
+        epCombo->addItem(tr("第 %1 集").arg(i + 1));
+    auto* timeEdit = new QLineEdit;
+    timeEdit->setPlaceholderText(tr("如 0:23:46.00"));
+    form->addRow(tr("校准哪一集"), epCombo);
+    form->addRow(tr("实测时刻"), timeEdit);
+    lay->addLayout(form);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    lay->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, this, [&dlg, epCombo, timeEdit, this] {
+        const auto cs = parseTimeToCs(timeEdit->text());
+        if (!cs.has_value()) {
+            QMessageBox::warning(&dlg, tr("实测校准"),
+                                 tr("时刻无法解析（支持 0:23:46.00 / 23:46 / 纯秒数）"));
+            return;
+        }
+        const int row = epCombo->currentIndex();
+        const Cs off = session_->calibrateToObserved(row, *cs);
+        statusBar()->showMessage(
+            tr("第 %1 集偏移已设为 %2（实测 %3 − 首行 %4）")
+                .arg(row + 1).arg(formatCs(off)).arg(formatCs(*cs))
+                .arg(formatCs(session_->firstContentStart(row))), 8000);
+        dlg.accept();
+    });
+
+    dlg.exec();
 }
 
 }  // namespace suture
