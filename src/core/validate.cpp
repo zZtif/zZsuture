@@ -1,5 +1,7 @@
 #include "validate.hpp"
 
+#include "merge.hpp"   // breakpointShiftAt（T11：C1/C2 按校正后时间校验）
+
 namespace suture {
 namespace {
 
@@ -15,6 +17,8 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
         return;
 
     // ---- 每集平移后的边界（P3/P4 口径：只算非 Comment 非零时长 Dialogue）----
+    // T11：边界同样叠加时间点累积校正（与 merge 同一函数），C1/C2 按最终
+    // 时间校验——用户插入的黑场增量不能既改变渲染又不进校验。
     struct Bound {
         Cs minStart = 0, maxEnd = 0, offsetShifted = 0;
         std::optional<Cs> mplsEndShifted;
@@ -24,16 +28,22 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
     bounds.reserve(episodes.size());
     for (const EpisodeInput& ep : episodes) {
         Bound b;
-        b.offsetShifted = ep.offset + opt.globalShift;
+        // 注意区分两个时刻：base = 未校正基础时刻（用于查分段）；offsetShifted
+        // = 该集起点的最终时刻（含校正）——查找若用含校正值会双重叠加
+        const Cs base = ep.offset + opt.globalShift;
+        b.offsetShifted = base + breakpointShiftAt(base, opt.breakpointShifts);
         b.mplsEndShifted = ep.mplsEnd.has_value()
-            ? std::optional<Cs>(*ep.mplsEnd + opt.globalShift)
+            ? std::optional<Cs>(*ep.mplsEnd + opt.globalShift
+                                + breakpointShiftAt(*ep.mplsEnd + opt.globalShift,
+                                                    opt.breakpointShifts))
             : std::nullopt;
         bool first = true;
         for (const EventLine& ev : ep.doc->events) {
             if (ev.isComment || ev.zeroDuration())
                 continue;
-            const Cs s = ev.start + b.offsetShifted;
-            const Cs e = ev.end + b.offsetShifted;
+            const Cs warp = breakpointShiftAt(base + ev.start, opt.breakpointShifts);
+            const Cs s = ev.start + base + warp;
+            const Cs e = ev.end + base + warp;
             if (first) {
                 b.minStart = s;
                 b.maxEnd = e;

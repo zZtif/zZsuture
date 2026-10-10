@@ -66,6 +66,8 @@ private slots:
     void c2BoundaryOverlap();   // C2：跨集边界重叠
     void c2BoundaryGap();       // C2：异常空档
     void c2NoFalsePositive();   // C2：预填/双语同刻不误报
+    void breakpointWarp();      // T11：时间点累积校正（函数+合并集成）
+    void breakpointValidate();  // T11：C1/C2 按校正后时间校验
 };
 
 void TestMerge::styleIsolation()
@@ -363,6 +365,68 @@ void TestMerge::c2NoFalsePositive()
     const MergeResult r = merge({makeEp(d1, off[0], 1), makeEp(d2, off[1], 2)}, {});
     QVERIFY(!hasCode(r.diags, DiagCode::BoundaryOverlap));
     QVERIFY(!hasCode(r.diags, DiagCode::BoundaryGap));
+}
+
+void TestMerge::breakpointWarp()
+{
+    // 函数单测：at 为最终坐标；基础时刻按段界 b_k = at_k − 前序增量换算
+    QList<BreakpointShift> bps;
+    bps.append({Cs(100 * 100), Cs(350)});      // 100s 处插入 +3.5s（黑屏）
+    bps.append({Cs(200 * 100 + 350), Cs(-150)});   // 200s（最终坐标）处 −1.5s
+    QCOMPARE(breakpointShiftAt(Cs(99 * 100), bps), Cs(0));        // 点前不动
+    QCOMPARE(breakpointShiftAt(Cs(100 * 100 - 1), bps), Cs(0));   // 恰在点前
+    QCOMPARE(breakpointShiftAt(Cs(100 * 100), bps), Cs(350));     // 点上生效
+    QCOMPARE(breakpointShiftAt(Cs(150 * 100), bps), Cs(350));
+    // 第 2 点基础段界 = 20000+3.5s−0.35? 换算：at_2 − δ_1 = 200350−350 = 200000
+    QCOMPARE(breakpointShiftAt(Cs(200 * 100 - 1), bps), Cs(350));
+    QCOMPARE(breakpointShiftAt(Cs(200 * 100), bps), Cs(200));     // 350−150
+    QCOMPARE(breakpointShiftAt(Cs(1000 * 100), bps), Cs(200));
+    QCOMPARE(breakpointShiftAt(Cs(0), QList<BreakpointShift>{}), Cs(0));
+
+    // 合并集成：死后文场景——ep1 结束 24:00，ep2 从 24:00 起整体 +3.5s，
+    // 且 25:00（最终坐标）起再来 −1.5s；EP 标记随校正移动
+    auto d1 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:01.00,0:24:00.00,ED_jap,,0,0,0,,一"));
+    auto d2 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:01.00,0:23:00.00,ED_jap,,0,0,0,,二"));
+    QList<BreakpointShift> bps2;
+    bps2.append({Cs(24 * 6000), Cs(350)});
+    bps2.append({Cs(25 * 6000 + 350), Cs(-150)});
+    MergeOptions opt;
+    opt.breakpointShifts = bps2;
+    const MergeResult r = merge({makeEp(d1, 0, 1), makeEp(d2, 24 * 6000, 2)}, opt);
+    // ep1 行不动；EP1 标记仍在 0
+    QCOMPARE(r.merged.events[1].start, Cs(100));
+    // EP2 标记 = 24:00 + 3.5s = 24:03.50
+    QCOMPARE(r.merged.events[2].start, Cs(24 * 6000 + 350));
+    // ep2 行（基础 24:01.00 / 最终坐标段界 24:00）→ +3.5s = 24:04.50
+    QCOMPARE(r.merged.events[3].start, Cs(24 * 6000 + 100 + 350));
+    QCOMPARE(r.merged.events[3].end, Cs(24 * 6000 + 23 * 6000 + 350));
+    // 派生 maxEnd 含校正
+    QCOMPARE(r.merged.maxDialogueEnd, Cs(24 * 6000 + 23 * 6000 + 350));
+}
+
+void TestMerge::breakpointValidate()
+{
+    // C2：在集界插入黑场增量后，原本的跨界重叠应消失（按校正后时间判定）；
+    // 未校正时同样的配置会报 BoundaryOverlap
+    auto d1 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:01.00,0:24:10.00,ED_jap,,0,0,0,,一"));   // 侵入 10s
+    auto d2 = makeDoc(QStringLiteral(
+        "Dialogue: 0,0:00:01.00,0:23:00.00,ED_jap,,0,0,0,,二"));
+    QList<EpisodeInput> eps;
+    eps << makeEp(d1, 0, 1) << makeEp(d2, 24 * 6000, 2);
+
+    MergeOptions plain;
+    const MergeResult r1 = merge(eps, plain);
+    QVERIFY(hasCode(r1.diags, DiagCode::BoundaryOverlap));
+
+    MergeOptions fixed;
+    fixed.breakpointShifts.append({Cs(24 * 6000), Cs(10 * 100)});   // 插 10s 黑场
+    const MergeResult r2 = merge(eps, fixed);
+    QVERIFY(!hasCode(r2.diags, DiagCode::BoundaryOverlap));
+    // ep2 行确实被推开：24:01 + 10s
+    QCOMPARE(r2.merged.events[3].start, Cs(24 * 6000 + 100 + 1000));
 }
 
 QTEST_MAIN(TestMerge)
