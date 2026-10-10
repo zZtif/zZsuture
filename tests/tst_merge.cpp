@@ -54,6 +54,7 @@ private slots:
     void styleIsolation();      // S1/S2
     void sameFileDupStyle();    // 同文件重名 → #2 消歧
     void undefinedRef();        // S3
+    void starRefFix();          // S3 升级：*X → X 去星号修正（死后文实证）
     void rTagRewrite();         // S7
     void scriptInfoResolve();   // S4
     void timeShift();           // S5/T4/T6：偏移+全局+逐行微调
@@ -103,6 +104,31 @@ void TestMerge::undefinedRef()
     QCOMPARE(r.merged.events[1].style, QStringLiteral("*Default"));
     QCOMPARE(r.merged.events[2].style, QStringLiteral("*Default"));
     QVERIFY(hasCode(r.diags, DiagCode::UndefinedStyleRef));
+}
+
+void TestMerge::starRefFix()
+{
+    // 死后文 2008 年实证（2026-10-10 所有者报告渲染 bug）：引用 *Default/
+    // *ed_chi 等带星号样式，表内定义不带星号——播放器回退默认样式致字体
+    // 变小跑左下角。修正：*X → X（去星号后走正常隔离改名）+ Warning 留痕。
+    auto d1 = makeDoc(
+        QStringLiteral(
+            "Dialogue: 0,0:00:01.00,0:00:02.00,*Default,,0,0,0,,a\n"
+            "Dialogue: 0,0:00:03.00,0:00:04.00,*ED_jap,,0,0,0,,{\\k20}卡{\\r*ED_jap}拉"),
+        QStringLiteral("Style: Default,Arial,20"));
+    const MergeResult r = merge({makeEp(d1, 0, 1)}, {});
+    // 事件行：修正后指向隔离名
+    QCOMPARE(r.merged.events[1].style, QStringLiteral("Default@1"));
+    QCOMPARE(r.merged.events[2].style, QStringLiteral("ED_jap@1"));
+    // \r 标签内的带星号引用同步修正
+    QVERIFY(r.merged.events[2].text.contains(QStringLiteral("{\\rED_jap@1}")));
+    // Warning 留痕（含修正说明）
+    bool hasFixWarn = false;
+    for (const auto& d : r.diags)
+        if (d.code == DiagCode::UndefinedStyleRef && d.level == DiagLevel::Warning
+            && d.message.contains(QStringLiteral("修正")))
+            hasFixWarn = true;
+    QVERIFY(hasFixWarn);
 }
 
 void TestMerge::rTagRewrite()
