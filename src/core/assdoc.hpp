@@ -99,8 +99,18 @@ struct LineAdjustment {   // F06 单行微调：也是参数，不是修改（D7
     Cs      delta;
 };
 
+// T11 时间点累积校正（所有者设计，v1.4.2 人工主线）：在合并时间轴上设
+// "时间点 + 增量"，从每个时间点起、其后所有行平移该增量，逐点累加——
+// 用于恒定偏移无法表达的结构差异（集间黑屏/转场、段间错位）。增量可负
+// （BD 版删减内容）。常量平移不动行内相对时序，卡拉OK \k 安全。
+struct BreakpointShift {
+    Cs at = 0;       // 时间点（合并时间轴最终坐标，即播放器显示的时刻）
+    Cs delta = 0;    // 从该点起追加的平移量（厘秒）
+};
+
 struct MergeOptions {
     Cs globalShift = 0;                 // F06 全局微调
+    QList<BreakpointShift> breakpointShifts;   // T11 时间点累积校正
     // C2 空档阈值：预填/PlayItem 模式下无缝连播应为 0（默认 2 秒）；章节模式
     // 的集间黑场/ED 空白是常态，由 Session 切为 5 分钟（T8 场景差异化）
     Cs boundaryGapThreshold = 2 * 100;
