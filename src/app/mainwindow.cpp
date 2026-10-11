@@ -89,14 +89,14 @@ void MainWindow::buildUi()
     pv->setContentsMargins(8, 8, 8, 8);
 
     auto* hint = new QLabel(tr("拖入字幕文件/文件夹到窗口任意位置\n"
-                               "在列表中按住行拖动可排序\n"
-                               "双击偏移列改每集起点\n"
+                               "列表中按住行拖动可排序\n"
+                               "双击\"本集开始于\"列可修改\n"
                                "（支持 0:24:09.45 / 24:09.45 / 纯秒数）"));
     hint->setWordWrap(true);
     pv->addWidget(hint);
 
     // MPLS 面板（阶段 3：原盘播放列表 → 每集起点自动偏移，T1/T3）
-    auto* mplsBox = new QGroupBox(tr("MPLS 自动偏移"));
+    auto* mplsBox = new QGroupBox(tr("原盘解析"));
     auto* mv = new QVBoxLayout(mplsBox);
     auto* mplsPath = new QLineEdit;
     mplsPath->setPlaceholderText(tr("拖入 .mpls 或点浏览选择"));
@@ -105,9 +105,9 @@ void MainWindow::buildUi()
     pathRow->addWidget(mplsPath, 1);
     pathRow->addWidget(browseBtn);
     mv->addLayout(pathRow);
-    auto* parseBtn = new QPushButton(tr("解析"));
-    auto* applySuggestBtn = new QPushButton(tr("应用建议偏移"));
-    auto* clearMplsBtn = new QPushButton(tr("清除 MPLS"));
+    auto* parseBtn = new QPushButton(tr("读取原盘"));
+    auto* applySuggestBtn = new QPushButton(tr("套用参考起点"));
+    auto* clearMplsBtn = new QPushButton(tr("清除"));
     auto* btnRow = new QHBoxLayout;
     btnRow->addWidget(parseBtn);
     btnRow->addWidget(applySuggestBtn);
@@ -118,9 +118,9 @@ void MainWindow::buildUi()
     auto* startSpin = new QSpinBox;
     startSpin->setRange(1, 1);
     startSpin->setSuffix(tr(" / 正片数"));
-    startRow->addWidget(new QLabel(tr("字幕第1集对应第")));
+    startRow->addWidget(new QLabel(tr("字幕第一集对应盘内第")));
     startRow->addWidget(startSpin);
-    startRow->addWidget(new QLabel(tr("个正片")));
+    startRow->addWidget(new QLabel(tr("集")));
     mv->addLayout(startRow);
     auto* mplsInfo = new QLabel(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
     mplsInfo->setWordWrap(true);
@@ -136,7 +136,7 @@ void MainWindow::buildUi()
             if (session_->mplsChapterMode()) {
                 // v1.4.2：多集一个 m2ts 只给参考值（告警面板），应用是显式动作；
                 // 起始正片是 PlayItem 映射的概念，此模式下无意义
-                text += tr("｜ 分集点参考值见告警面板");
+                text += tr("｜ 每集参考起点见告警列表");
                 startSpin->setRange(1, 1);
                 startSpin->setEnabled(false);
             } else {
@@ -145,7 +145,8 @@ void MainWindow::buildUi()
             }
             mplsInfo->setText(text);
         } else {
-            mplsInfo->setText(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
+            mplsInfo->setText(tr("未读取。未读取原盘时，各集开始时间按上一集"
+                                       "字幕结束自动推算。"));
             startSpin->setRange(1, 1);
             startSpin->setEnabled(false);
         }
@@ -186,7 +187,7 @@ void MainWindow::buildUi()
         session_->applyMplsSuggestion();
     });
 
-    auto* tuneBox = new QGroupBox(tr("全局微调"));
+    auto* tuneBox = new QGroupBox(tr("整体提前/延后"));
     auto* tv = new QHBoxLayout(tuneBox);
     auto* shiftSpin = new QDoubleSpinBox;
     shiftSpin->setRange(-36000.0, 36000.0);
@@ -197,7 +198,7 @@ void MainWindow::buildUi()
             [this](double sec) {
                 session_->setGlobalShift(Cs(std::llround(sec * 100.0)));
             });
-    tv->addWidget(new QLabel(tr("所有字幕")));
+    tv->addWidget(new QLabel(tr("全部字幕")));
     tv->addWidget(shiftSpin);
     pv->addWidget(tuneBox);
 

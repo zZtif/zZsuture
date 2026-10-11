@@ -235,7 +235,7 @@ void TestDrag::chapterModeEndToEnd()
     bool hasResetWarn = false;
     for (const Diagnostic& d : session.allDiags())
         if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported
-            && d.message.contains(QStringLiteral("回落")))
+            && d.message.contains(QStringLiteral("恢复为自动推算")))
             hasResetWarn = true;
     QVERIFY(hasResetWarn);
 }

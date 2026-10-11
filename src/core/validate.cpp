@@ -66,14 +66,15 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
         if (over > kC1ThresholdCs)
             out.push_back(Diagnostic::make(
                 DiagLevel::Warning, DiagCode::DurationMismatch,
-                QStringLiteral("第 %1 集字幕比 MPLS 出点晚 %2——偏移可能偏大"
-                               "或该集字幕时轴与原盘不同源")
+                QStringLiteral("第 %1 集字幕比该集结束位置晚 %2——开始时间可能"
+                               "偏大，或该集字幕与原盘不同源")
                     .arg(i + 1).arg(formatCs(over)), i));
         const Cs early = b.offsetShifted - b.minStart;
         if (early > kC1ThresholdCs)
             out.push_back(Diagnostic::make(
                 DiagLevel::Warning, DiagCode::DurationMismatch,
-                QStringLiteral("第 %1 集字幕比 MPLS 入点早 %2——偏移可能偏小")
+                QStringLiteral("第 %1 集字幕比该集开始位置早 %2——开始时间可能"
+                               "偏小")
                     .arg(i + 1).arg(formatCs(early)), i));
     }
 
@@ -94,8 +95,8 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
         else if (next.offsetShifted - prev.maxEnd > opt.boundaryGapThreshold)
             out.push_back(Diagnostic::make(
                 DiagLevel::Info, DiagCode::BoundaryGap,
-                QStringLiteral("第 %1 集与第 %2 集之间有 %3 空档——请确认偏移"
-                               "或集间黑场是否正常")
+                QStringLiteral("第 %1 集与第 %2 集之间有 %3 空隙——请确认是否为"
+                               "集间黑屏")
                     .arg(i + 1).arg(i + 2)
                     .arg(formatCs(next.offsetShifted - prev.maxEnd)), i + 1));
     }

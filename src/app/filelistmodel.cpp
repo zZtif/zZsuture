@@ -65,11 +65,11 @@ QVariant FileListModel::data(const QModelIndex& idx, int role) const
         return formatCs(e.offset);
     case ColSource:
         switch (e.source) {
-        case EpisodeInput::OffsetSource::Mpls:    return QStringLiteral("MPLS");
-        case EpisodeInput::OffsetSource::Chapter: return QStringLiteral("章节");
+        case EpisodeInput::OffsetSource::Mpls:    return QStringLiteral("原盘");
+        case EpisodeInput::OffsetSource::Chapter: return QStringLiteral("原盘");
         case EpisodeInput::OffsetSource::Manual:  return QStringLiteral("手动");
-        case EpisodeInput::OffsetSource::Adjusted:return QStringLiteral("调整");
-        default:                                  return QStringLiteral("预填");
+        case EpisodeInput::OffsetSource::Adjusted:return QStringLiteral("手动");
+        default:                                  return QStringLiteral("自动推算");
         }
     }
     return {};
@@ -105,8 +105,8 @@ QVariant FileListModel::headerData(int sec, Qt::Orientation o, int role) const
     case ColName:    return QStringLiteral("文件名");
     case ColEp:      return QStringLiteral("集");
     case ColMaxEnd:  return QStringLiteral("最晚结束");
-    case ColOffset:  return QStringLiteral("偏移");
-    case ColSource:  return QStringLiteral("来源");
+    case ColOffset:  return QStringLiteral("本集开始于");
+    case ColSource:  return QStringLiteral("依据");
     }
     return {};
 }

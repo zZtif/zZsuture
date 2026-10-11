@@ -217,8 +217,8 @@ void Session::analyzeMpls()
         recomputePrefill();
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Warning, DiagCode::MplsUnsupported,
-            QStringLiteral("文件列表已变化，此前应用的 MPLS/章节偏移已回落"
-                           "预填——请重新核对或再次应用建议")));
+            QStringLiteral("文件列表已变化，此前套用的原盘参考值已恢复为"
+                           "自动推算——请重新核对或再次套用")));
     }
 
     if (!mpls_)
@@ -237,9 +237,9 @@ void Session::analyzeMpls()
         chapterSuggestion_ = ch;
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("多集一个 m2ts（%1）：已按章节算出每集起点参考值——"
-                           "预填未改动，确认后点\"应用建议偏移\"；导出文件名"
-                           "建议与 m2ts 同名（%1.ass）").arg(ch.clip)));
+            QStringLiteral("该 m2ts 含多集（%1）：已算出每集参考起点——自动"
+                           "推算未改动，确认后点\"套用参考起点\"；导出文件名"
+                           "建议与视频同名（%1.ass）").arg(ch.clip)));
         for (const Diagnostic& d : diags)
             mplsDiags_.push_back(d);
         // 预填交叉核对（T2 洞察的安全网）：连续切割的字幕自带分集信息
@@ -257,9 +257,9 @@ void Session::analyzeMpls()
                 if (qAbs(ch.offsets[k] - prefill[k]) > kPrefillDivergeCs)
                     mplsDiags_.push_back(Diagnostic::make(
                         DiagLevel::Warning, DiagCode::MplsUnsupported,
-                        QStringLiteral("第 %1 集章节建议 %2 与字幕连续预填 %3 "
-                                       "相差 %4 秒——两者应接近，应用前请逐集"
-                                       "核对（预填=上一集字幕最晚结束）")
+                        QStringLiteral("第 %1 集参考起点 %2 与自动推算 %3 "
+                                       "相差 %4 秒——两者应接近，套用前请逐集"
+                                       "核对（自动推算 = 上一集字幕结束处）")
                             .arg(k + 1).arg(formatCs(ch.offsets[k]))
                             .arg(formatCs(prefill[k]))
                             .arg(qAbs(ch.offsets[k] - prefill[k]) / 100), k));
@@ -297,8 +297,8 @@ bool Session::applyMplsSuggestion()
         }
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("已应用章节建议偏移（来源列标\"章节\"）——请逐集"
-                           "核对，不对的双击偏移列修改")));
+            QStringLiteral("已套用参考起点（依据列标\"原盘\"）——请逐集核对，"
+                           "不对的可直接修改")));
         remerge();
         emit paramsChanged();
         emit resultChanged();
@@ -314,8 +314,8 @@ bool Session::applyMplsSuggestion()
         }
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("已应用 PlayItem 建议偏移（来源列标\"MPLS\"）——"
-                           "请逐集核对")));
+            QStringLiteral("已套用正片参考起点（依据列标\"原盘\"）——请逐集"
+                           "核对")));
         remerge();
         emit paramsChanged();
         emit resultChanged();
