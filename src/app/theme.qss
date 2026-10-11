@@ -1,88 +1,177 @@
 /* ============================================================
-   SUture 暗色主题 —— 阶段 0 基础版
-   色板：背景 #1e1f24 / 面板 #25262c / 边框 #3a3c45
-         文字 #d8dae3 / 弱文字 #8b8e9a / 强调 #4f8cff
+   SUture 暗色主题 v2（A1-③ 现代化重做，需求 v2.0 §5.3）
+   令牌：背景 #17181d / 面板 #1f2127 / 卡片 #22242b / 边框 #33363f
+         文字 #dde0e8 / 弱文字 #8b8e9a / 强调 #4f8cff / 成功 #3fbf6f
    ============================================================ */
 
 * {
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
     font-size: 13px;
-    color: #d8dae3;
+    color: #dde0e8;
 }
 
 QMainWindow, QDialog {
-    background-color: #1e1f24;
+    background-color: #17181d;
 }
 
-/* ---- 中央拖放提示占位（阶段 0）---- */
-QLabel#dropHint {
+/* ---- 分隔条 ---- */
+QSplitter::handle {
+    background-color: #17181d;
+}
+QSplitter::handle:hover {
+    background-color: #33363f;
+}
+
+/* ---- 卡片（分组盒）---- */
+QGroupBox {
+    background-color: #22242b;
+    border: 1px solid #2c2f38;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding: 8px 8px 8px 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 6px;
+    color: #aeb2bd;
+    background-color: #22242b;
+    border-radius: 4px;
+}
+
+/* ---- 按钮：扁平 + 悬停 ---- */
+QPushButton {
+    background-color: #2b2e37;
+    border: 1px solid #33363f;
+    border-radius: 6px;
+    padding: 6px 14px;
+}
+QPushButton:hover {
+    background-color: #333745;
+    border-color: #4f8cff;
+}
+QPushButton:pressed {
+    background-color: #262932;
+}
+QPushButton:disabled {
     color: #5a5d68;
-    font-size: 16px;
+    border-color: #2b2e37;
+    background-color: #22242b;
+}
+
+/* 主操作按钮（导出）与套用：强调色实底 */
+QPushButton#exportBtn, QPushButton#applySuggestBtn {
+    background-color: #4f8cff;
+    border: none;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#exportBtn:hover, QPushButton#applySuggestBtn:hover {
+    background-color: #6b9eff;
+}
+QPushButton#exportBtn:pressed, QPushButton#applySuggestBtn:pressed {
+    background-color: #3f78e0;
+}
+QPushButton#exportBtn:disabled, QPushButton#applySuggestBtn:disabled {
+    background-color: #2c3a55;
+    color: #6a7488;
+}
+
+/* 高级选项折叠开关：低调文字按钮 */
+QPushButton#advToggle {
+    background-color: transparent;
+    border: none;
+    color: #8b8e9a;
+    text-align: left;
+    padding: 2px 4px;
+}
+QPushButton#advToggle:hover {
+    color: #dde0e8;
+}
+
+/* ---- 输入控件 ---- */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background-color: #1c1e24;
+    border: 1px solid #33363f;
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: #4f8cff;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #4f8cff;
+}
+QLineEdit::placeholder {
+    color: #5f636e;
+}
+
+/* ---- 页签 ---- */
+QTabWidget::pane {
+    border: 1px solid #2c2f38;
+    border-radius: 8px;
+    background-color: #1f2127;
+    top: -1px;
+}
+QTabBar::tab {
+    background-color: transparent;
+    color: #8b8e9a;
+    border: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 7px 18px;
+    margin-right: 2px;
+}
+QTabBar::tab:hover {
+    color: #dde0e8;
+}
+QTabBar::tab:selected {
+    color: #dde0e8;
+    background-color: #1f2127;
+    border: 1px solid #2c2f38;
+    border-bottom: 2px solid #4f8cff;
+}
+
+/* ---- 表格 ---- */
+QTableView, QTreeView, QListView, QTableWidget {
+    background-color: #1f2127;
+    alternate-background-color: #23252d;
+    border: 1px solid #2c2f38;
+    border-radius: 6px;
+    gridline-color: transparent;   /* 去网格线，靠隔行底色区分（§5.3） */
+    selection-background-color: #3d63b8;
+    selection-color: #ffffff;
+}
+QTableView::item, QTableWidget::item {
+    border: none;
+    padding: 3px 6px;
+}
+QHeaderView::section {
+    background-color: #22242b;
+    border: none;
+    border-bottom: 1px solid #2c2f38;
+    padding: 6px 8px;
+    color: #8b8e9a;
+    font-weight: 600;
 }
 
 /* ---- 状态栏 ---- */
 QStatusBar {
-    background-color: #1a1b1f;
-    border-top: 1px solid #3a3c45;
+    background-color: #141519;
+    border-top: 1px solid #2c2f38;
     color: #8b8e9a;
 }
 QStatusBar::item {
     border: none;
 }
 
-/* ---- 通用控件（为后续阶段预置）---- */
-QPushButton {
-    background-color: #2e3038;
-    border: 1px solid #3a3c45;
-    border-radius: 4px;
-    padding: 5px 16px;
-}
-QPushButton:hover {
-    border-color: #4f8cff;
-}
-QPushButton:pressed {
-    background-color: #25262c;
-}
-QPushButton:disabled {
-    color: #5a5d68;
-    border-color: #2e3038;
-}
-
-QLineEdit, QComboBox, QSpinBox {
-    background-color: #25262c;
-    border: 1px solid #3a3c45;
-    border-radius: 4px;
-    padding: 4px 8px;
-    selection-background-color: #4f8cff;
-}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-    border-color: #4f8cff;
-}
-
-QTableView, QTreeView, QListView {
-    background-color: #25262c;
-    alternate-background-color: #2a2c34;
-    border: 1px solid #3a3c45;
-    gridline-color: #3a3c45;
-    selection-background-color: #3d63b8;
-    selection-color: #ffffff;
-}
-QHeaderView::section {
-    background-color: #2a2c34;
-    border: none;
-    border-right: 1px solid #3a3c45;
-    border-bottom: 1px solid #3a3c45;
-    padding: 6px 8px;
-    color: #8b8e9a;
-}
-
+/* ---- 滚动条 ---- */
 QScrollBar:vertical {
     background: transparent;
     width: 10px;
     margin: 0;
 }
 QScrollBar::handle:vertical {
-    background: #3a3c45;
+    background: #33363f;
     border-radius: 5px;
     min-height: 30px;
 }
@@ -99,7 +188,12 @@ QScrollBar:horizontal {
     margin: 0;
 }
 QScrollBar::handle:horizontal {
-    background: #3a3c45;
+    background: #33363f;
     border-radius: 5px;
     min-width: 30px;
+}
+
+/* ---- 对话框按钮盒 ---- */
+QDialogButtonBox QPushButton {
+    min-width: 72px;
 }

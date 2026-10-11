@@ -76,6 +76,7 @@ void MainWindow::buildUi()
                                 QAbstractItemView::SelectedClicked |
                                 QAbstractItemView::EditKeyPressed);
     fileTable_->verticalHeader()->hide();
+    fileTable_->setAlternatingRowColors(true);   // 去网格线后的行区分（§5.3）
     fileTable_->horizontalHeader()->setStretchLastSection(false);
     fileTable_->horizontalHeader()->setSectionResizeMode(FileListModel::ColName,
                                                          QHeaderView::Stretch);
@@ -121,6 +122,7 @@ void MainWindow::buildUi()
     suggestTable_->setHorizontalHeaderLabels(
         {tr("集"), tr("参考起点"), tr("当前起点"), tr("差值")});
     suggestTable_->verticalHeader()->hide();
+    suggestTable_->setAlternatingRowColors(true);
     suggestTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     suggestTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     suggestTable_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -289,6 +291,7 @@ void MainWindow::buildUi()
     diagTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     diagTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     diagTable_->verticalHeader()->hide();
+    diagTable_->setAlternatingRowColors(true);
     diagTable_->horizontalHeader()->setSectionResizeMode(DiagModel::ColMsg,
                                                          QHeaderView::Stretch);
     diagTable_->setColumnWidth(DiagModel::ColLevel, 70);
