@@ -5,6 +5,7 @@
 
 class QDoubleSpinBox;
 class QLabel;
+class QTableWidget;
 class QTableView;
 
 namespace suture {
@@ -28,6 +29,7 @@ private:
     void exportMerged();
     void refreshDiags();
     void refreshStatus();
+    void refreshSuggestTable();    // A1：原盘解析卡片的参考起点表
     void openBreakpointDialog();   // T11：时间点累积校正
     void openCalibrateDialog();    // T11：按播放器实测时刻校准某集偏移
 
@@ -36,6 +38,8 @@ private:
     DiagModel*    diagModel_;
     FileTableView* fileTable_ = nullptr;
     QTableView*   diagTable_ = nullptr;
+    QTableWidget* suggestTable_ = nullptr;   // 原盘解析卡片：参考起点表
+    QLabel*       suggestPlaceholder_ = nullptr;
     QLabel*       statusLabel_ = nullptr;
 };
 

@@ -282,6 +282,15 @@ bool Session::mplsSuggestionAvailable() const
     return chapterSuggestion_.has_value() || playItemSuggestion_.has_value();
 }
 
+QList<Cs> Session::mplsSuggestedOffsets() const
+{
+    if (chapterSuggestion_.has_value())
+        return chapterSuggestion_->offsets;
+    if (playItemSuggestion_.has_value())
+        return playItemSuggestion_->offsets;
+    return {};
+}
+
 bool Session::applyMplsSuggestion()
 {
     if (chapterSuggestion_.has_value()) {

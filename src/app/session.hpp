@@ -49,6 +49,8 @@ public:
     QString mplsClipName() const { return mplsClipName_; }  // 多集 m2ts 的 clip 名（F07）
     bool mplsSuggestionAvailable() const;                   // 有可应用的建议？
     bool applyMplsSuggestion();                             // 显式应用（来源标"章节"/MPLS）
+    // A1：右侧解析卡片的参考起点表数据（无建议时为空）
+    QList<Cs> mplsSuggestedOffsets() const;
     // 字幕第 1 集对应第几个正片（0 基）——整季连播链只合并中间几集的场景
     // （章节模式下无效：分集点来自章节而非 PlayItem 边界）
     void setMplsStartMain(int startMain);
