@@ -124,8 +124,8 @@ MplsOutcome parseMpls(const QByteArray& raw)
     if (nSubPaths > 0)
         out.diags.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("该播放列表含 %1 条 SubPath（画中画/BD-J 等），"
-                           "已忽略，仅按主路径 PlayItem 计算偏移")
+            QStringLiteral("该播放列表含 %1 条附加轨道（画中画等），已忽略，"
+                           "仅按主路径的正片计算")
                 .arg(nSubPaths)));
 
     // ---- T9：同文件内完全相同的连续项 → 疑似假/循环播放列表 ----
@@ -142,9 +142,8 @@ MplsOutcome parseMpls(const QByteArray& raw)
             if (i - runStart >= 3)
                 out.diags.push_back(Diagnostic::make(
                     DiagLevel::Warning, DiagCode::MplsUnsupported,
-                    QStringLiteral("第 %1~%2 个 PlayItem 完全相同（clip %3）——"
-                                   "疑似假播放列表/循环列表，请换用真实的主"
-                                   "播放列表文件")
+                    QStringLiteral("第 %1~%2 个正片片段完全相同（%3）——疑似假播放列表/"
+                                   "循环列表，请换用真正的播放列表文件")
                         .arg(runStart + 1).arg(i).arg(info.items[runStart].clip)));
             runStart = i;
         }
@@ -164,8 +163,7 @@ MplsOutcome parseMpls(const QByteArray& raw)
             markAddr + 6 + qsizetype(nMarks) * 14 > raw.size()) {
             out.diags.push_back(Diagnostic::make(
                 DiagLevel::Warning, DiagCode::MplsUnsupported,
-                QStringLiteral("PlayListMark 段结构异常，已忽略章节信息"
-                               "（PlayItem 偏移不受影响）")));
+                QStringLiteral("章节信息段结构异常，已忽略章节（正片解析不受影响）")));
         } else {
             info.marks.reserve(nMarks);
             for (quint16 i = 0; i < nMarks; ++i) {
@@ -179,8 +177,7 @@ MplsOutcome parseMpls(const QByteArray& raw)
                 if (mk.itemIndex >= int(info.items.size())) {
                     out.diags.push_back(Diagnostic::make(
                         DiagLevel::Warning, DiagCode::MplsUnsupported,
-                        QStringLiteral("第 %1 个章节引用了不存在的 PlayItem"
-                                       "（%2），已忽略该章节")
+                        QStringLiteral("第 %1 个章节指向不存在的正片片段，已忽略该章节")
                             .arg(i + 1).arg(mk.itemIndex + 1)));
                     continue;
                 }
@@ -217,9 +214,9 @@ MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
             durations += QStringLiteral("…（共 %1 项）").arg(info.items.size());
         diags.push_back(Diagnostic::make(
             DiagLevel::Warning, DiagCode::MplsUnsupported,
-            QStringLiteral("起始正片 #%1 起只有 %2 个正片 PlayItem，少于字幕"
-                           "文件数（%3）——请调低起始集或减少文件，或在偏移列"
-                           "手动设定（前 %4 项时长：%5）")
+            QStringLiteral("从第 %1 个正片片段起只有 %2 个正片，少于字幕文件数"
+                           "（%3）——请调低\"字幕第一集对应盘内第几集\"、减少"
+                           "文件，或手动设定各集开始时间（前 %4 项时长：%5）")
                 .arg(startMain + 1)
                 .arg(m.mainItems.size() - startMain)
                 .arg(episodeCount).arg(shown).arg(durations)));
@@ -245,8 +242,8 @@ MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
     if (startMain > 0)
         diags.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("字幕第 1 集对应该链的第 %1 个正片，起点偏移已含"
-                           "其前全部内容（%2）")
+            QStringLiteral("字幕第一集对应第 %1 个正片，开始时间已包含其前的"
+                           "全部内容（%2）")
                 .arg(startMain + 1).arg(formatCs(m.offsets.value(0)))));
     return m;
 }
@@ -368,9 +365,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
             m.offsets.append(target(k));
         diags.push_back(Diagnostic::make(
             DiagLevel::Warning, DiagCode::MplsUnsupported,
-            QStringLiteral("章节无法构成合法分集序列（%1 个候选 / %2 集，"
-                           "间距约束 10~60 分钟），已按等分位置预填，"
-                           "请在偏移列逐集核对").arg(M).arg(N)));
+            QStringLiteral("章节无法构成合理的分集顺序（%1 个候选 / %2 集），"
+                           "已按均匀估计填入，请逐集核对").arg(M).arg(N)));
     } else {
         // 回溯最优序列
         int best = 0;
@@ -390,8 +386,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
                 m.offsets.append(target(k));
                 diags.push_back(Diagnostic::make(
                     DiagLevel::Warning, DiagCode::MplsUnsupported,
-                    QStringLiteral("第 %1 集起点附近 %2 内没有章节，已按等分位置"
-                                   " %3 预填——请人工核对（最近候选 %4）")
+                    QStringLiteral("第 %1 集开始位置附近 %2 内没有章节，已按均匀"
+                                   "估计 %3 填入——请人工核对（最近的候选 %4）")
                         .arg(k + 1).arg(formatCs(kSnapTolCs)).arg(formatCs(target(k)))
                         .arg(formatCs(cand[i])), k));
             } else {
@@ -400,8 +396,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
                 if (k > 0 && qAbs(delta) > 30 * 100)
                     diags.push_back(Diagnostic::make(
                         DiagLevel::Info, DiagCode::MplsUnsupported,
-                        QStringLiteral("第 %1 集起点建议吸附到章节 %2（等分位置"
-                                       " %3，偏 %4 秒）——请核对")
+                        QStringLiteral("第 %1 集起点对齐到章节 %2（均匀估计 %3，"
+                                       "差 %4 秒）——请核对")
                             .arg(k + 1).arg(formatCs(cand[i])).arg(formatCs(target(k)))
                             .arg(delta / 100), k));
             }
@@ -414,8 +410,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
         if (sigCount + 1 != N)
             diags.push_back(Diagnostic::make(
                 DiagLevel::Info, DiagCode::MplsUnsupported,
-                QStringLiteral("章节签名识别出 %1 个疑似分集点，与字幕集数"
-                               "（%2）不一定一致——请逐集核对建议值")
+                QStringLiteral("识别出 %1 个疑似分集点，与字幕集数（%2）不一定"
+                               "一致——请逐集核对")
                     .arg(sigCount).arg(N)));
     }
 
@@ -454,8 +450,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
             m.offsets[k] = anchored;
             diags.push_back(Diagnostic::make(
                 DiagLevel::Info, DiagCode::MplsUnsupported,
-                QStringLiteral("第 %1 集已按片尾曲对齐：字幕 ED %2 ↔ 盘章节"
-                               " %3（比等分位偏 %4 秒）")
+                QStringLiteral("第 %1 集按片尾曲对齐：字幕片尾 %2 ↔ 盘上的章节"
+                               " %3（差 %4 秒）")
                     .arg(k + 1).arg(formatCs(subEd)).arg(formatCs(best))
                     .arg((anchored - target(k)) / 100), k));
         }
