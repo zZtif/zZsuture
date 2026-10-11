@@ -20,6 +20,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTableView>
@@ -60,6 +61,7 @@ void MainWindow::buildUi()
     setWindowTitle(tr("SUture — BDMV 字幕合并 ｜ 构建 %1")
                        .arg(QString::fromLatin1(kBuildStamp)));
     resize(1080, 680);
+    setMinimumSize(1000, 640);   // A1：下限兜底（时间轴再窄不可用）
     setAcceptDrops(true);
 
     // ---- 上半部：文件表 + 右侧控制面板 ----
@@ -79,23 +81,22 @@ void MainWindow::buildUi()
                                                          QHeaderView::Stretch);
     fileTable_->setColumnWidth(FileListModel::ColOrder, 36);
     fileTable_->setColumnWidth(FileListModel::ColEp, 44);
-    fileTable_->setColumnWidth(FileListModel::ColMaxEnd, 90);
-    fileTable_->setColumnWidth(FileListModel::ColOffset, 90);
-    fileTable_->setColumnWidth(FileListModel::ColSource, 60);
+    fileTable_->setColumnWidth(FileListModel::ColMaxEnd, 92);
+    fileTable_->setColumnWidth(FileListModel::ColOffset, 100);
+    fileTable_->setColumnWidth(FileListModel::ColSource, 76);
 
-    // 右侧面板
+    // 右侧面板（A1 布局壳：主视野只留 原盘解析卡片 + 高级选项 + 导出）
     auto* panel = new QWidget;
     auto* pv = new QVBoxLayout(panel);
     pv->setContentsMargins(8, 8, 8, 8);
+    pv->setSpacing(10);
 
     auto* hint = new QLabel(tr("拖入字幕文件/文件夹到窗口任意位置\n"
-                               "列表中按住行拖动可排序\n"
-                               "双击\"本集开始于\"列可修改\n"
-                               "（支持 0:24:09.45 / 24:09.45 / 纯秒数）"));
+                               "列表中按住行拖动可排序"));
     hint->setWordWrap(true);
     pv->addWidget(hint);
 
-    // MPLS 面板（阶段 3：原盘播放列表 → 每集起点自动偏移，T1/T3）
+    // ---- 原盘解析卡片：解析事实 + 参考起点表 + 一键套用 ----
     auto* mplsBox = new QGroupBox(tr("原盘解析"));
     auto* mv = new QVBoxLayout(mplsBox);
     auto* mplsPath = new QLineEdit;
@@ -106,37 +107,108 @@ void MainWindow::buildUi()
     pathRow->addWidget(browseBtn);
     mv->addLayout(pathRow);
     auto* parseBtn = new QPushButton(tr("读取原盘"));
-    auto* applySuggestBtn = new QPushButton(tr("套用参考起点"));
     auto* clearMplsBtn = new QPushButton(tr("清除"));
     auto* btnRow = new QHBoxLayout;
-    btnRow->addWidget(parseBtn);
-    btnRow->addWidget(applySuggestBtn);
+    btnRow->addWidget(parseBtn, 1);
     btnRow->addWidget(clearMplsBtn);
     mv->addLayout(btnRow);
-    // 起始正片选择（整季连播链只合并中间几集的场景，实证：GTO 44 集链）
+    auto* mplsInfo = new QLabel(tr("未读取。各集开始时间按上一集字幕结束自动推算。"));
+    mplsInfo->setWordWrap(true);
+    mv->addWidget(mplsInfo);
+    // 参考起点表（A1：建议值的正式归宿——不再塞进告警面板）
+    suggestTable_ = new QTableWidget;
+    suggestTable_->setColumnCount(4);
+    suggestTable_->setHorizontalHeaderLabels(
+        {tr("集"), tr("参考起点"), tr("当前起点"), tr("差值")});
+    suggestTable_->verticalHeader()->hide();
+    suggestTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    suggestTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    suggestTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    suggestTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    suggestTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    suggestTable_->setColumnWidth(0, 34);
+    suggestTable_->setColumnWidth(3, 52);
+    suggestTable_->setMaximumHeight(160);
+    suggestPlaceholder_ = new QLabel(
+        tr("读取原盘后，这里会列出每集的参考起点\n（来自章节），确认后可一键套用"));
+    suggestPlaceholder_->setWordWrap(true);
+    suggestPlaceholder_->setAlignment(Qt::AlignCenter);
+    mv->addWidget(suggestTable_);
+    mv->addWidget(suggestPlaceholder_);
+    auto* applySuggestBtn = new QPushButton(tr("套用参考起点"));
+    applySuggestBtn->setObjectName(QStringLiteral("applySuggestBtn"));
+    connect(applySuggestBtn, &QPushButton::clicked, this, [this] {
+        // v1.4.2 原则：应用是显式动作（预测只建议、永不自动生效）
+        session_->applyMplsSuggestion();
+    });
+    mv->addWidget(applySuggestBtn);
+    // 表格行点击 → 定位文件列表对应行
+    connect(suggestTable_, &QTableWidget::cellClicked, this, [this](int r, int) {
+        if (r >= 0 && r < fileModel_->rowCount())
+            fileTable_->selectRow(r);
+    });
+    pv->addWidget(mplsBox);
+
+    // ---- 高级选项（折叠）：低频功能收纳 ----
+    auto* advToggle = new QPushButton(tr("▸ 高级选项"));
+    advToggle->setCheckable(true);
+    advToggle->setObjectName(QStringLiteral("advToggle"));
+    auto* advPanel = new QWidget;
+    auto* av = new QVBoxLayout(advPanel);
+    av->setContentsMargins(0, 4, 0, 4);
+    // 字幕第一集对应盘内第几集（整季链只合并中间几集的场景；GTO 44 集链实证）
     auto* startRow = new QHBoxLayout;
     auto* startSpin = new QSpinBox;
     startSpin->setRange(1, 1);
-    startSpin->setSuffix(tr(" / 正片数"));
-    startRow->addWidget(new QLabel(tr("字幕第一集对应盘内第")));
+    startRow->addWidget(new QLabel(tr("第一集对应盘内第")), 1);
     startRow->addWidget(startSpin);
-    startRow->addWidget(new QLabel(tr("集")));
-    mv->addLayout(startRow);
-    auto* mplsInfo = new QLabel(tr("未加载。无 MPLS 时按上集结束时刻预填。"));
-    mplsInfo->setWordWrap(true);
-    mv->addWidget(mplsInfo);
-    pv->addWidget(mplsBox);
+    startRow->addWidget(new QLabel(tr("个正片")));
+    av->addLayout(startRow);
+    auto* advHint1 = new QLabel(tr("（整季连播链只合并中间几集时使用；多集"
+                                   "一个视频文件的盘无需此项）"));
+    advHint1->setWordWrap(true);
+    av->addWidget(advHint1);
+    // 整体提前/延后
+    auto* shiftRow = new QHBoxLayout;
+    auto* shiftSpin = new QDoubleSpinBox;
+    shiftSpin->setRange(-36000.0, 36000.0);
+    shiftSpin->setDecimals(2);
+    shiftSpin->setSuffix(tr(" 秒"));
+    shiftSpin->setValue(0.0);
+    connect(shiftSpin, &QDoubleSpinBox::valueChanged, this,
+            [this](double sec) {
+                session_->setGlobalShift(Cs(std::llround(sec * 100.0)));
+            });
+    shiftRow->addWidget(new QLabel(tr("全部字幕提前/延后")), 1);
+    shiftRow->addWidget(shiftSpin);
+    av->addLayout(shiftRow);
+    // 校正工具（A3 将由时间轴取代并删除，暂收纳于此）
+    auto* bpBtn = new QPushButton(tr("分段校正…"));
+    auto* obsBtn = new QPushButton(tr("实测校准…"));
+    connect(bpBtn, &QPushButton::clicked, this, &MainWindow::openBreakpointDialog);
+    connect(obsBtn, &QPushButton::clicked, this, &MainWindow::openCalibrateDialog);
+    auto* calibRow = new QHBoxLayout;
+    calibRow->addWidget(bpBtn, 1);
+    calibRow->addWidget(obsBtn, 1);
+    av->addLayout(calibRow);
+    advPanel->setVisible(false);
+    connect(advToggle, &QPushButton::toggled, this, [advToggle, advPanel](bool on) {
+        advPanel->setVisible(on);
+        advToggle->setText(on ? tr("▾ 高级选项") : tr("▸ 高级选项"));
+    });
+    pv->addWidget(advToggle);
+    pv->addWidget(advPanel);
 
     const auto applyMplsInfo = [this, mplsInfo, startSpin, applySuggestBtn] {
         applySuggestBtn->setEnabled(session_->mplsSuggestionAvailable());
         if (const MplsInfo* m = session_->mpls()) {
-            QString text = tr("已解析：%1 个 PlayItem，总时长 %2")
+            QString text = tr("已解析：%1 个正片片段，总时长 %2")
                                .arg(m->items.size())
                                .arg(formatCs(m->totalCs));
             if (session_->mplsChapterMode()) {
-                // v1.4.2：多集一个 m2ts 只给参考值（告警面板），应用是显式动作；
-                // 起始正片是 PlayItem 映射的概念，此模式下无意义
-                text += tr("｜ 每集参考起点见告警列表");
+                // 多集一个 m2ts：参考值在右侧表；"第一集对应第几个正片"
+                // 是一集一个片段的概念，此模式下无意义
+                text += tr("｜ 参考起点见下表");
                 startSpin->setRange(1, 1);
                 startSpin->setEnabled(false);
             } else {
@@ -145,8 +217,8 @@ void MainWindow::buildUi()
             }
             mplsInfo->setText(text);
         } else {
-            mplsInfo->setText(tr("未读取。未读取原盘时，各集开始时间按上一集"
-                                       "字幕结束自动推算。"));
+            mplsInfo->setText(tr("未读取。各集开始时间按上一集字幕结束"
+                                       "自动推算。"));
             startSpin->setRange(1, 1);
             startSpin->setEnabled(false);
         }
@@ -154,7 +226,6 @@ void MainWindow::buildUi()
     connect(startSpin, &QSpinBox::valueChanged, this, [this](int v) {
         session_->setMplsStartMain(v - 1);   // UI 1 基 → 内部 0 基
     });
-    connect(session_, &Session::structureChanged, this, applyMplsInfo);
     connect(browseBtn, &QPushButton::clicked, this, [this, mplsPath] {
         const QString p = QFileDialog::getOpenFileName(
             this, tr("选择 MPLS 播放列表"), QString(),
@@ -172,50 +243,19 @@ void MainWindow::buildUi()
         QString err;
         if (!session_->loadMplsFile(p, &err)) {
             applyMplsInfo();
-            QMessageBox::warning(this, tr("MPLS 解析失败"),
+            refreshSuggestTable();
+            QMessageBox::warning(this, tr("原盘解析失败"),
                                  err.isEmpty() ? tr("无法读取该文件") : err);
             return;
         }
         applyMplsInfo();
+        refreshSuggestTable();
     });
     connect(clearMplsBtn, &QPushButton::clicked, this, [this, applyMplsInfo] {
         session_->clearMpls();
         applyMplsInfo();
+        refreshSuggestTable();
     });
-    connect(applySuggestBtn, &QPushButton::clicked, this, [this] {
-        // v1.4.2 原则：应用是显式动作（预测只建议、永不自动生效）
-        session_->applyMplsSuggestion();
-    });
-
-    auto* tuneBox = new QGroupBox(tr("整体提前/延后"));
-    auto* tv = new QHBoxLayout(tuneBox);
-    auto* shiftSpin = new QDoubleSpinBox;
-    shiftSpin->setRange(-36000.0, 36000.0);
-    shiftSpin->setDecimals(2);
-    shiftSpin->setSuffix(tr(" 秒"));
-    shiftSpin->setValue(0.0);
-    connect(shiftSpin, &QDoubleSpinBox::valueChanged, this,
-            [this](double sec) {
-                session_->setGlobalShift(Cs(std::llround(sec * 100.0)));
-            });
-    tv->addWidget(new QLabel(tr("全部字幕")));
-    tv->addWidget(shiftSpin);
-    pv->addWidget(tuneBox);
-
-    // T11 校正工具（v1.4.2 人工主线）
-    auto* calibBox = new QGroupBox(tr("校正工具"));
-    auto* cv = new QVBoxLayout(calibBox);
-    auto* bpBtn = new QPushButton(tr("分段校正…"));
-    auto* obsBtn = new QPushButton(tr("实测校准…"));
-    connect(bpBtn, &QPushButton::clicked, this, &MainWindow::openBreakpointDialog);
-    connect(obsBtn, &QPushButton::clicked, this, &MainWindow::openCalibrateDialog);
-    cv->addWidget(bpBtn);
-    cv->addWidget(obsBtn);
-    auto* calibHint = new QLabel(tr("分段校正：在时间点插入黑屏/转场增量\n"
-                                    "实测校准：读播放器时刻，工具算偏移"));
-    calibHint->setWordWrap(true);
-    cv->addWidget(calibHint);
-    pv->addWidget(calibBox);
 
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
     connect(removeBtn, &QPushButton::clicked, this, [this] {
@@ -226,12 +266,12 @@ void MainWindow::buildUi()
         if (!rows.isEmpty())
             session_->removeRows(rows);
     });
-    pv->addWidget(removeBtn);
 
     auto* exportBtn = new QPushButton(tr("合并导出"));
     exportBtn->setObjectName(QStringLiteral("exportBtn"));
     exportBtn->setMinimumHeight(40);
     connect(exportBtn, &QPushButton::clicked, this, &MainWindow::exportMerged);
+    pv->addWidget(removeBtn);
     pv->addWidget(exportBtn);
     pv->addStretch(1);
 
@@ -242,7 +282,7 @@ void MainWindow::buildUi()
     topSplit->setStretchFactor(1, 0);
     topSplit->setSizes({760, 300});
 
-    // ---- 下半部：告警列表 ----
+    // ---- 下半部：页签（时间轴为默认展示，A2 填充真实视图；告警第二页）----
     diagTable_ = new QTableView;
     diagTable_->setModel(diagModel_);
     diagTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -254,23 +294,76 @@ void MainWindow::buildUi()
     diagTable_->setColumnWidth(DiagModel::ColLevel, 70);
     diagTable_->setColumnWidth(DiagModel::ColId, 50);
     diagTable_->setColumnWidth(DiagModel::ColFile, 56);
-
     auto* diagBox = new QGroupBox(tr("告警"));
     auto* dv = new QVBoxLayout(diagBox);
     dv->setContentsMargins(4, 4, 4, 4);
     dv->addWidget(diagTable_);
 
+    auto* timelinePlaceholder = new QLabel(
+        tr("时间轴视图（下一步）\n\n"
+           "拖入字幕后，这里将显示每一集的时间块——\n"
+           "可以整体拖动、添加分段点、缩放到秒级微调"));
+    timelinePlaceholder->setAlignment(Qt::AlignCenter);
+
+    auto* tabs = new QTabWidget;
+    tabs->addTab(timelinePlaceholder, tr("时间轴"));
+    tabs->addTab(diagBox, tr("告警"));
+
     auto* mainSplit = new QSplitter(Qt::Vertical);
     mainSplit->addWidget(topSplit);
-    mainSplit->addWidget(diagBox);
+    mainSplit->addWidget(tabs);
     mainSplit->setStretchFactor(0, 3);
     mainSplit->setStretchFactor(1, 2);
+    mainSplit->setSizes({400, 260});
     setCentralWidget(mainSplit);
+
+    // 解析卡片随会话状态刷新（参考表在偏移变化后要重算"当前/差值"列）
+    connect(session_, &Session::structureChanged, this, [this, applyMplsInfo] {
+        applyMplsInfo();
+        refreshSuggestTable();
+    });
+    connect(session_, &Session::paramsChanged, this, [this] {
+        refreshSuggestTable();
+    });
 
     statusLabel_ = new QLabel;
     // 常驻右侧：不被 showMessage 的临时消息（导出成功提示等）覆盖
     statusBar()->addPermanentWidget(statusLabel_);
     refreshStatus();
+}
+
+void MainWindow::refreshSuggestTable()
+{
+    // 原盘解析卡片的参考起点表：无建议/无文件时显示引导占位
+    const QList<Cs> sug = session_->mplsSuggestedOffsets();
+    const bool show = !sug.isEmpty() && sug.size() == session_->count();
+    suggestTable_->setVisible(show);
+    suggestPlaceholder_->setVisible(!show);
+    if (!show)
+        return;
+    suggestTable_->setRowCount(session_->count());
+    for (int i = 0; i < session_->count(); ++i) {
+        const Cs cur = session_->entry(i).offset;
+        const Cs diff = sug[i] - cur;
+        const auto set = [this](int r, int c, const QString& t) {
+            auto* it = suggestTable_->item(r, c);
+            if (!it) {
+                it = new QTableWidgetItem(t);
+                it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+                suggestTable_->setItem(r, c, it);
+            } else {
+                it->setText(t);
+            }
+        };
+        set(i, 0, QString::number(i + 1));
+        set(i, 1, formatCs(sug[i]));
+        set(i, 2, formatCs(cur));
+        set(i, 3, diff == 0 ? QStringLiteral("—")
+                            : QStringLiteral("%1%2 秒")
+                                  .arg(diff > 0 ? QLatin1String("+")
+                                                : QLatin1String("-"))
+                                  .arg(qAbs(diff) / 100.0, 0, 'f', 1));
+    }
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* e)
