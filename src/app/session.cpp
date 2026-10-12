@@ -56,6 +56,7 @@ void Session::addUrls(const QList<QUrl>& urls)
     else
         recomputePrefill();
     checkEpisodeOrder();
+    undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -74,6 +75,7 @@ void Session::removeRows(const QList<int>& rows)
     else
         recomputePrefill();
     checkEpisodeOrder();
+    undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -99,6 +101,7 @@ void Session::moveRows(int srcRow, int count_, int destRow)
     else
         recomputePrefill();
     checkEpisodeOrder();
+    undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
     emit structureChanged();
     emit resultChanged();
@@ -158,13 +161,16 @@ void Session::checkEpisodeOrder()
     }
 }
 
-void Session::setOffset(int row, Cs offset)
+void Session::setOffset(int row, Cs offset, bool fromTimeline)
 {
     if (row < 0 || row >= count())
         return;
+    pushUndo();
     Entry& e = entries_[size_t(row)];
     e.offset = offset;
-    e.source = EpisodeInput::OffsetSource::Manual;   // 手改行不再被预填覆盖
+    // 手改行不再被预填覆盖；时间轴拖动同样定案（依据可区分）
+    e.source = fromTimeline ? EpisodeInput::OffsetSource::Timeline
+                            : EpisodeInput::OffsetSource::Manual;
     recomputePrefill();   // 下游 Prefill 行连锁重算
     remerge();
     emit paramsChanged();
@@ -173,6 +179,7 @@ void Session::setOffset(int row, Cs offset)
 
 void Session::setGlobalShift(Cs shift)
 {
+    pushUndo();
     options_.globalShift = shift;
     remerge();
     emit paramsChanged();
@@ -294,6 +301,7 @@ QList<Cs> Session::mplsSuggestedOffsets() const
 bool Session::applyMplsSuggestion()
 {
     if (chapterSuggestion_.has_value()) {
+        pushUndo();
         const ChapterMapping& ch = *chapterSuggestion_;
         // 章节偏移下集间黑场/ED 空白是常态（死后文实测 1~2.5 分钟），
         // C2 空档阈值放宽到 5 分钟
@@ -314,6 +322,7 @@ bool Session::applyMplsSuggestion()
         return true;
     }
     if (playItemSuggestion_.has_value()) {
+        pushUndo();
         const MplsMapping& m = *playItemSuggestion_;
         for (int i = 0; i < count(); ++i) {
             Entry& e = entries_[size_t(i)];
@@ -333,47 +342,56 @@ bool Session::applyMplsSuggestion()
     return false;
 }
 
-void Session::setBreakpointShifts(const QList<BreakpointShift>& bps)
+void Session::setSegmentPoints(const QList<SegmentPoint>& pts)
 {
-    options_.breakpointShifts = bps;
+    pushUndo();
+    options_.segmentPoints = pts;
     remerge();
     emit paramsChanged();
     emit resultChanged();
 }
 
-QList<Cs> Session::episodeBoundaries() const
+Session::ParamSnapshot Session::snapshotParams() const
 {
-    // 各集字幕结束的基础时刻（T11 推荐时间点）：偏移+全局+该集 maxEnd。
-    // 不含已填增量（基础坐标）——叠加显示由对话框负责
-    QList<Cs> out;
-    for (int i = 0; i + 1 < count(); ++i) {
-        const Entry& e = entries_[size_t(i)];
-        out.append(e.offset + options_.globalShift + e.doc->maxDialogueEnd);
+    ParamSnapshot s;
+    s.globalShift = options_.globalShift;
+    s.gapThreshold = options_.boundaryGapThreshold;
+    s.points = options_.segmentPoints;
+    for (const Entry& e : entries_) {
+        s.offsets.append(e.offset);
+        s.sources.append(e.source);
+        s.mplsEnds.append(e.mplsEnd);
     }
-    return out;
+    return s;
 }
 
-Cs Session::firstContentStart(int row) const
+void Session::pushUndo()
 {
-    if (row < 0 || row >= count())
-        return 0;
-    Cs best = -1;
-    for (const EventLine& ev : entries_[size_t(row)].doc->events) {
-        if (ev.isComment || ev.zeroDuration())
-            continue;
-        if (best < 0 || ev.start < best)
-            best = ev.start;
-    }
-    return best < 0 ? 0 : best;
+    // 参数快照式撤销（决定 32）：栈上限 50；结构变化时由调用方清栈
+    undoStack_.append(snapshotParams());
+    while (undoStack_.size() > 50)
+        undoStack_.removeFirst();
 }
 
-Cs Session::calibrateToObserved(int row, Cs observedCs)
+void Session::undo()
 {
-    // 实测校准（T11 人工主线）：observed = 该集首句内容在播放器中的实际
-    // 时刻（用户读数），新偏移 = observed − 该集最早内容时刻
-    const Cs off = observedCs - firstContentStart(row);
-    setOffset(row, off);
-    return off;
+    if (undoStack_.isEmpty())
+        return;
+    const ParamSnapshot s = undoStack_.takeLast();
+    if (s.offsets.size() != count())   // 防御：结构与快照不符（不应发生）
+        return;
+    for (int i = 0; i < count(); ++i) {
+        Entry& e = entries_[size_t(i)];
+        e.offset = s.offsets[i];
+        e.source = s.sources[i];
+        e.mplsEnd = s.mplsEnds[i];
+    }
+    options_.segmentPoints = s.points;
+    options_.globalShift = s.globalShift;
+    options_.boundaryGapThreshold = s.gapThreshold;
+    remerge();
+    emit paramsChanged();
+    emit resultChanged();
 }
 
 bool Session::loadMplsFile(const QString& path, QString* errMsg)

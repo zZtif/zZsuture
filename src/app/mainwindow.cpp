@@ -1,14 +1,10 @@
 #include "mainwindow.hpp"
 
-#include <QComboBox>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFileDialog>
-#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -184,15 +180,6 @@ void MainWindow::buildUi()
     shiftRow->addWidget(new QLabel(tr("全部字幕提前/延后")), 1);
     shiftRow->addWidget(shiftSpin);
     av->addLayout(shiftRow);
-    // 校正工具（A3 将由时间轴取代并删除，暂收纳于此）
-    auto* bpBtn = new QPushButton(tr("分段校正…"));
-    auto* obsBtn = new QPushButton(tr("实测校准…"));
-    connect(bpBtn, &QPushButton::clicked, this, &MainWindow::openBreakpointDialog);
-    connect(obsBtn, &QPushButton::clicked, this, &MainWindow::openCalibrateDialog);
-    auto* calibRow = new QHBoxLayout;
-    calibRow->addWidget(bpBtn, 1);
-    calibRow->addWidget(obsBtn, 1);
-    av->addLayout(calibRow);
     advPanel->setVisible(false);
     connect(advToggle, &QPushButton::toggled, this, [advToggle, advPanel](bool on) {
         advPanel->setVisible(on);
@@ -449,163 +436,6 @@ void MainWindow::refreshStatus()
         tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4  ｜ 构建 %5")
             .arg(session_->count()).arg(err).arg(warn).arg(info)
             .arg(QString::fromLatin1(kBuildStamp)));
-}
-
-void MainWindow::openBreakpointDialog()
-{
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("分段校正（时间点累积）"));
-    dlg.resize(420, 340);
-    auto* lay = new QVBoxLayout(&dlg);
-    auto* hint = new QLabel(tr(
-        "从每个时间点起，其后所有字幕平移该增量（逐点累加，可负）。\n"
-        "时间点已按各集字幕结束预填；填入增量后下方时间点自动重算。\n"
-        "也可改时间点或添加任意时刻（如某集 OP/ED 起点）。删行 = 清空该行增量。"));
-    hint->setWordWrap(true);
-    lay->addWidget(hint);
-
-    auto* table = new QTableWidget;
-    table->setColumnCount(2);
-    table->setHorizontalHeaderLabels({tr("时间点"), tr("增量(秒)")});
-    table->horizontalHeader()->setStretchLastSection(true);
-    table->verticalHeader()->setVisible(false);
-    lay->addWidget(table);
-
-    auto* addRowBtn = new QPushButton(tr("添加时间点"));
-    lay->addWidget(addRowBtn);
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    lay->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, this, [&dlg, table, this] {
-        // 逐行解析：时间点宽容解析（0:23:41.69 / 23:41.69 / 秒数均可）
-        QList<BreakpointShift> bps;
-        for (int r = 0; r < table->rowCount(); ++r) {
-            const auto* timeItem = table->item(r, 0);
-            auto* spin = qobject_cast<QDoubleSpinBox*>(table->cellWidget(r, 1));
-            if (!timeItem || !spin)
-                continue;
-            const auto cs = parseTimeToCs(timeItem->text());
-            if (!cs.has_value()) {
-                QMessageBox::warning(&dlg, tr("分段校正"),
-                                     tr("第 %1 行的时间点无法解析（支持"
-                                        " 0:23:41.69 / 23:41.69 / 纯秒数）")
-                                         .arg(r + 1));
-                return;
-            }
-            if (std::llround(spin->value() * 100.0) == 0)
-                continue;   // 零增量行不保存
-            BreakpointShift b;
-            b.at = *cs;
-            b.delta = Cs(std::llround(spin->value() * 100.0));
-            bps.append(b);
-        }
-        session_->setBreakpointShifts(bps);
-        dlg.accept();
-    });
-
-    // 行构造：建议行 = 各集边界（基础坐标 + 上方已填增量实时重算）；
-    // 重开对话框时恢复已保存的增量（按行序对应，超出的建议行增量 0）
-    const QList<Cs> bases = session_->episodeBoundaries();
-    const QList<BreakpointShift> saved = session_->breakpointShifts();
-    const int rows = std::max(int(bases.size()), int(saved.size())) + 0;
-    QVector<bool> manual(rows, false);   // 用户改过的时间点不再自动重算
-    bool updating = false;               // 程序写单元格时不记为 manual
-
-    const auto recomputeSuggested = [table, &bases, &manual, &updating]() {
-        if (updating || bases.isEmpty())
-            return;
-        updating = true;
-        Cs cum = 0;
-        for (int r = 0; r < int(bases.size()); ++r) {
-            if (!manual[r]) {
-                auto* it = table->item(r, 0);
-                if (it)
-                    it->setText(formatCs(bases[r] + cum));
-            }
-            if (const auto* spin = qobject_cast<QDoubleSpinBox*>(table->cellWidget(r, 1)))
-                cum += Cs(std::llround(spin->value() * 100.0));
-        }
-        updating = false;
-    };
-
-    for (int r = 0; r < rows; ++r) {
-        auto* timeItem = new QTableWidgetItem;
-        timeItem->setText(r < int(bases.size()) ? formatCs(bases[r]) : QString());
-        table->setItem(r, 0, timeItem);
-        auto* spin = new QDoubleSpinBox;
-        spin->setRange(-36000.0, 36000.0);
-        spin->setDecimals(2);
-        if (r < int(saved.size()))
-            spin->setValue(double(saved[r].delta) / 100.0);
-        table->setCellWidget(r, 1, spin);
-        connect(spin, &QDoubleSpinBox::valueChanged, this,
-                [recomputeSuggested](double) { recomputeSuggested(); });
-    }
-    connect(table, &QTableWidget::itemChanged, this, [&manual, &updating](QTableWidgetItem* it) {
-        if (!updating && it && it->column() == 0)
-            manual[it->row()] = true;   // 用户改过的时间点不再自动重算
-    });
-    connect(addRowBtn, &QPushButton::clicked, this, [table, &dlg]() {
-        const int r = table->rowCount();
-        table->insertRow(r);
-        table->setItem(r, 0, new QTableWidgetItem);
-        auto* spin = new QDoubleSpinBox;
-        spin->setRange(-36000.0, 36000.0);
-        spin->setDecimals(2);
-        table->setCellWidget(r, 1, spin);
-        table->setCurrentCell(r, 0);
-        Q_UNUSED(dlg)
-    });
-
-    dlg.exec();
-}
-
-void MainWindow::openCalibrateDialog()
-{
-    if (session_->count() == 0) {
-        QMessageBox::information(this, tr("实测校准"), tr("请先拖入字幕文件。"));
-        return;
-    }
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("实测校准"));
-    auto* lay = new QVBoxLayout(&dlg);
-    auto* hint = new QLabel(tr(
-        "在播放器中找到某集第一句台词实际出现的时刻，填到下面——\n"
-        "工具会算出该集偏移 = 实测时刻 − 该集字幕首行时刻。"));
-    hint->setWordWrap(true);
-    lay->addWidget(hint);
-
-    auto* form = new QFormLayout;
-    auto* epCombo = new QComboBox;
-    for (int i = 0; i < session_->count(); ++i)
-        epCombo->addItem(tr("第 %1 集").arg(i + 1));
-    auto* timeEdit = new QLineEdit;
-    timeEdit->setPlaceholderText(tr("如 0:23:46.00"));
-    form->addRow(tr("校准哪一集"), epCombo);
-    form->addRow(tr("实测时刻"), timeEdit);
-    lay->addLayout(form);
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    lay->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, this, [&dlg, epCombo, timeEdit, this] {
-        const auto cs = parseTimeToCs(timeEdit->text());
-        if (!cs.has_value()) {
-            QMessageBox::warning(&dlg, tr("实测校准"),
-                                 tr("时刻无法解析（支持 0:23:46.00 / 23:46 / 纯秒数）"));
-            return;
-        }
-        const int row = epCombo->currentIndex();
-        const Cs off = session_->calibrateToObserved(row, *cs);
-        statusBar()->showMessage(
-            tr("第 %1 集偏移已设为 %2（实测 %3 − 首行 %4）")
-                .arg(row + 1).arg(formatCs(off)).arg(formatCs(*cs))
-                .arg(formatCs(session_->firstContentStart(row))), 8000);
-        dlg.accept();
-    });
-
-    dlg.exec();
 }
 
 }  // namespace suture

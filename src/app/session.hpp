@@ -55,20 +55,18 @@ public:
     // （章节模式下无效：分集点来自章节而非 PlayItem 边界）
     void setMplsStartMain(int startMain);
 
-    // ---- T11 时间点累积校正 + 实测校准（v1.4.2 人工主线）----
-    void setBreakpointShifts(const QList<BreakpointShift>& bps);
-    QList<BreakpointShift> breakpointShifts() const { return options_.breakpointShifts; }
-    // 各集字幕结束的基础时刻（推荐时间点；基础坐标 = 偏移+全局+该集 maxEnd，
-    // 不含已填增量——对话框负责叠加显示）
-    QList<Cs> episodeBoundaries() const;
-    // 实测校准：observed = 该集首句内容在播放器中实际出现的时刻；
-    // 新偏移 = observed − 该集最早内容时刻。返回新偏移。
-    Cs calibrateToObserved(int row, Cs observedCs);
-    Cs firstContentStart(int row) const;   // 该集最早非 Comment 非零时长行
+    // ---- T11（A2 起由时间轴取代，对话框与旧 API 已随模型改造删除）----
 
     // ---- 参数（F03 设定与 F06 微调是同一入口）----
-    void setOffset(int row, Cs offset);               // 手改 → 来源变 Manual
+    void setOffset(int row, Cs offset, bool fromTimeline = false);
     void setGlobalShift(Cs shift);
+
+    // ---- A2：分段点（集内语义）与参数撤销 ----
+    void setSegmentPoints(const QList<SegmentPoint>& pts);
+    QList<SegmentPoint> segmentPoints() const { return options_.segmentPoints; }
+    // 参数快照式撤销（决定 32：覆盖偏移/分段点/全局/套用；结构变化不进栈）
+    void undo();
+    bool canUndo() const { return !undoStack_.isEmpty(); }
 
     // ---- 结果 ----
     const MergeResult* result() const { return result_ ? &*result_ : nullptr; }
@@ -88,6 +86,19 @@ private:
     void analyzeMpls();        // v1.4.2：解析+算建议（不改偏移）；结构性变化时调用
     void checkEpisodeOrder();  // T10：列表顺序 vs 集数一致性（告警不静默改序）
     void remerge();
+    void pushUndo();           // A2：参数快照压栈（调用时机 = 参数即将被改动前）
+
+    // 参数快照（决定 32）：偏移/依据/出点/分段点/全局/阈值全量，恢复即整体回滚
+    struct ParamSnapshot {
+        QList<Cs> offsets;
+        QList<EpisodeInput::OffsetSource> sources;
+        QList<std::optional<Cs>> mplsEnds;
+        QList<SegmentPoint> points;
+        Cs globalShift = 0;
+        Cs gapThreshold = 0;
+    };
+    ParamSnapshot snapshotParams() const;
+    QList<ParamSnapshot> undoStack_;
 
     QList<Entry> entries_;
     MergeOptions options_;

@@ -67,6 +67,7 @@ QVariant FileListModel::data(const QModelIndex& idx, int role) const
         switch (e.source) {
         case EpisodeInput::OffsetSource::Mpls:    return QStringLiteral("原盘");
         case EpisodeInput::OffsetSource::Chapter: return QStringLiteral("原盘");
+        case EpisodeInput::OffsetSource::Timeline:return QStringLiteral("时间轴");
         case EpisodeInput::OffsetSource::Manual:  return QStringLiteral("手动");
         case EpisodeInput::OffsetSource::Adjusted:return QStringLiteral("手动");
         default:                                  return QStringLiteral("自动推算");
