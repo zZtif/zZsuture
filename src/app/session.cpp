@@ -168,10 +168,31 @@ void Session::setOffset(int row, Cs offset, bool fromTimeline)
     pushUndo();
     Entry& e = entries_[size_t(row)];
     e.offset = offset;
-    // 手改行不再被预填覆盖；时间轴拖动同样定案（依据可区分）
+    // 手改行不再被预填覆盖；时间轴拖动同样定案（依据可区分）。
+    // v2.0 决定 25：参数编辑不触发预填级联——其它集不动（无隐式联动），
+    // 预填只在结构性变化（拖入/删除/重排/回落）时重算
     e.source = fromTimeline ? EpisodeInput::OffsetSource::Timeline
                             : EpisodeInput::OffsetSource::Manual;
-    recomputePrefill();   // 下游 Prefill 行连锁重算
+    remerge();
+    emit paramsChanged();
+    emit resultChanged();
+}
+
+void Session::setOffsets(const QList<int>& rows, const QList<Cs>& offsets,
+                         bool fromTimeline)
+{
+    if (rows.size() != offsets.size() || rows.isEmpty())
+        return;
+    pushUndo();
+    for (int k = 0; k < rows.size(); ++k) {
+        const int row = rows[k];
+        if (row < 0 || row >= count())
+            continue;
+        Entry& e = entries_[size_t(row)];
+        e.offset = offsets[k];
+        e.source = fromTimeline ? EpisodeInput::OffsetSource::Timeline
+                                : EpisodeInput::OffsetSource::Manual;
+    }
     remerge();
     emit paramsChanged();
     emit resultChanged();
@@ -296,6 +317,34 @@ QList<Cs> Session::mplsSuggestedOffsets() const
     if (playItemSuggestion_.has_value())
         return playItemSuggestion_->offsets;
     return {};
+}
+
+QList<Cs> Session::chapterTicks() const
+{
+    // 章节刻度 = 章节模式下唯一正片 PlayItem 的 Entry Mark 文件内相对时刻
+    // （与 mpls.cpp 的 kMainItemMinCs 同口径：60 秒为正片下限）
+    if (!mpls_ || !chapterMode_)
+        return {};
+    int mainIdx = -1, mainCount = 0;
+    for (int i = 0; i < mpls_->items.size(); ++i) {
+        if (mpls_->items[i].durationCs >= 60 * 100) {
+            ++mainCount;
+            mainIdx = i;
+        }
+    }
+    if (mainCount != 1)
+        return {};
+    const PlayItemSpan& item = mpls_->items[mainIdx];
+    QList<Cs> out;
+    for (const PlayListMark& mk : mpls_->marks) {
+        if (mk.itemIndex != mainIdx || mk.type != 1 || mk.time45k < item.in45k)
+            continue;
+        const Cs rel = ticks45kToCs(mk.time45k - item.in45k);
+        if (!out.contains(rel))
+            out.append(rel);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 bool Session::applyMplsSuggestion()

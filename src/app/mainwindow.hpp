@@ -14,6 +14,7 @@ class DiagModel;
 class FileListModel;
 class FileTableView;
 class Session;
+class TimelineView;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -36,6 +37,7 @@ private:
     DiagModel*    diagModel_;
     FileTableView* fileTable_ = nullptr;
     QTableView*   diagTable_ = nullptr;
+    TimelineView* timeline_ = nullptr;       // A2：时间轴主视图
     QTableWidget* suggestTable_ = nullptr;   // 原盘解析卡片：参考起点表
     QLabel*       suggestPlaceholder_ = nullptr;
     QLabel*       statusLabel_ = nullptr;

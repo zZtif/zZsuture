@@ -27,6 +27,7 @@
 #include "diagmodel.hpp"
 #include "filelistmodel.hpp"
 #include "session.hpp"
+#include "timelineview.hpp"
 #include "version.hpp"
 
 namespace suture {
@@ -289,14 +290,10 @@ void MainWindow::buildUi()
     dv->setContentsMargins(4, 4, 4, 4);
     dv->addWidget(diagTable_);
 
-    auto* timelinePlaceholder = new QLabel(
-        tr("时间轴视图（下一步）\n\n"
-           "拖入字幕后，这里将显示每一集的时间块——\n"
-           "可以整体拖动、添加分段点、缩放到秒级微调"));
-    timelinePlaceholder->setAlignment(Qt::AlignCenter);
-
+    // A2：时间轴主视图（F08）
+    timeline_ = new TimelineView(session_);
     auto* tabs = new QTabWidget;
-    tabs->addTab(timelinePlaceholder, tr("时间轴"));
+    tabs->addTab(timeline_, tr("时间轴"));
     tabs->addTab(diagBox, tr("告警"));
 
     auto* mainSplit = new QSplitter(Qt::Vertical);
