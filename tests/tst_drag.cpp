@@ -39,8 +39,8 @@ private slots:
     void orderMismatchWarning();  // T10：拖动致乱序 → 告警不静默改序
     void missingEpisodeWarning(); // T10：集数有洞 → 缺集告警
     void chapterPrefillDivergence(); // T8 修正：章节建议与预填背离 → 告警
-    void breakpointShiftSession();   // T11：Session 分段校正（推荐点+生效）
-    void calibrateSession();         // T11：实测校准算术
+    void segmentPointsSession();     // T11/A2：分段点集内语义 + 清空恢复
+    void undoParams();               // A2：参数快照撤销 + 结构变化清栈
 };
 
 namespace {
@@ -399,41 +399,50 @@ void TestDrag::chapterPrefillDivergence()
     QVERIFY(hasDiverge);
 }
 
-void TestDrag::breakpointShiftSession()
+void TestDrag::segmentPointsSession()
 {
-    Fixture fx;   // 4 个文件，事件 0:00:01.00→0:23:00.00（maxEnd 23min）
-    // 推荐时间点 = 各集边界（预填下 = 23/46/69 分钟处）
-    const QList<Cs> bounds = fx.session.episodeBoundaries();
-    QCOMPARE(bounds.size(), 3);
-    QCOMPARE(bounds[0], Cs(23 * 6000));
-    QCOMPARE(bounds[1], Cs(46 * 6000));
-    QCOMPARE(bounds[2], Cs(69 * 6000));
-
-    // 在第 1 个边界插 +3.5 秒黑场：第 2 集起的行被推开，第 1 集不动
-    QList<BreakpointShift> bps;
-    bps.append({bounds[0], Cs(350)});
-    fx.session.setBreakpointShifts(bps);
+    Fixture fx;   // 4 个文件，事件 0:00:01.00→0:23:00.00，fileId = 1..4
+    // 集内分段点：第 2 集文件在 0 处 +3.5s（= 整集后移，含 EP 标记），
+    // 其它集完全不动（集内语义，无隐式联动）
+    QList<SegmentPoint> pts;
+    pts.append({fx.session.entry(1).sub->id, 0, 350});
+    fx.session.setSegmentPoints(pts);
     const MergeResult* r = fx.session.result();
     QVERIFY(r);
     // events: [EP1标记, ep1行, EP2标记, ep2行, ...]
-    QCOMPARE(r->merged.events[0].start, Cs(0));            // EP1 标记不动
-    QCOMPARE(r->merged.events[1].start, Cs(100));          // ep1 首行不动
-    QCOMPARE(r->merged.events[2].start, Cs(23 * 6000 + 350));   // EP2 标记后移
+    QCOMPARE(r->merged.events[0].start, Cs(0));                  // EP1 标记不动
+    QCOMPARE(r->merged.events[1].start, Cs(100));                // ep1 首行不动
+    QCOMPARE(r->merged.events[2].start, Cs(23 * 6000 + 350));    // EP2 标记后移
     QCOMPARE(r->merged.events[3].start, Cs(23 * 6000 + 100 + 350));   // ep2 首行后移
+    QCOMPARE(r->merged.events[4].start, Cs(46 * 6000));          // EP3 标记不动
     // 清空恢复
-    fx.session.setBreakpointShifts({});
+    fx.session.setSegmentPoints({});
     QCOMPARE(fx.session.result()->merged.events[3].start, Cs(23 * 6000 + 100));
 }
 
-void TestDrag::calibrateSession()
+void TestDrag::undoParams()
 {
     Fixture fx;
-    // 播放器实测：第 2 集首句出现在 25:00.00 → 偏移 = 25:00 − 0:01 = 24:59
-    QCOMPARE(fx.session.firstContentStart(1), Cs(100));
-    const Cs off = fx.session.calibrateToObserved(1, Cs(25 * 6000));
-    QCOMPARE(off, Cs(25 * 6000 - 100));
-    QCOMPARE(fx.session.entry(1).offset, Cs(25 * 6000 - 100));
-    QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Manual);
+    // 偏移手改 → 撤销恢复
+    QCOMPARE(fx.session.entry(1).offset, Cs(23 * 6000));
+    fx.session.setOffset(1, Cs(25 * 6000));
+    QCOMPARE(fx.session.entry(1).offset, Cs(25 * 6000));
+    QVERIFY(fx.session.canUndo());
+    fx.session.undo();
+    QCOMPARE(fx.session.entry(1).offset, Cs(23 * 6000));
+    QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Prefill);
+    // 分段点 → 撤销恢复
+    QList<SegmentPoint> pts;
+    pts.append({fx.session.entry(1).sub->id, 0, 350});
+    fx.session.setSegmentPoints(pts);
+    QVERIFY(fx.session.canUndo());
+    fx.session.undo();
+    QCOMPARE(fx.session.segmentPoints().size(), 0);
+    // 结构变化清栈（决定 32：增删移不进撤销）
+    fx.session.setOffset(1, Cs(30 * 6000));
+    QVERIFY(fx.session.canUndo());
+    fx.session.moveRows(0, 1, 3);
+    QVERIFY(!fx.session.canUndo());
 }
 
 QTEST_MAIN(TestDrag)

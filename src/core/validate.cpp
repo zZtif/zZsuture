@@ -28,20 +28,22 @@ void validate(const QList<EpisodeInput>& episodes, const MergeOptions& opt,
     bounds.reserve(episodes.size());
     for (const EpisodeInput& ep : episodes) {
         Bound b;
-        // 注意区分两个时刻：base = 未校正基础时刻（用于查分段）；offsetShifted
-        // = 该集起点的最终时刻（含校正）——查找若用含校正值会双重叠加
+        // A2：分段点为集内语义（挂 fileId、与 event.start 同域）——集起点按
+        // fileTime 0 处的增量、事件按自身位置；该集全部点的增量和 = 集界终点
         const Cs base = ep.offset + opt.globalShift;
-        b.offsetShifted = base + breakpointShiftAt(base, opt.breakpointShifts);
+        b.offsetShifted = base + segmentWarpAt(ep.fileId, 0, opt.segmentPoints);
+        Cs totalWarp = 0;
+        for (const SegmentPoint& p : opt.segmentPoints)
+            if (p.fileId == ep.fileId)
+                totalWarp += p.delta;
         b.mplsEndShifted = ep.mplsEnd.has_value()
-            ? std::optional<Cs>(*ep.mplsEnd + opt.globalShift
-                                + breakpointShiftAt(*ep.mplsEnd + opt.globalShift,
-                                                    opt.breakpointShifts))
+            ? std::optional<Cs>(*ep.mplsEnd + opt.globalShift + totalWarp)
             : std::nullopt;
         bool first = true;
         for (const EventLine& ev : ep.doc->events) {
             if (ev.isComment || ev.zeroDuration())
                 continue;
-            const Cs warp = breakpointShiftAt(base + ev.start, opt.breakpointShifts);
+            const Cs warp = segmentWarpAt(ep.fileId, ev.start, opt.segmentPoints);
             const Cs s = ev.start + base + warp;
             const Cs e = ev.end + base + warp;
             if (first) {

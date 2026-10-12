@@ -126,23 +126,13 @@ QList<Cs> computePrefillOffsets(const QList<std::shared_ptr<const AssDocument>>&
     return out;
 }
 
-Cs breakpointShiftAt(Cs baseTime, const QList<BreakpointShift>& bps)
+Cs segmentWarpAt(quint64 fileId, Cs fileTime, const QList<SegmentPoint>& pts)
 {
-    if (bps.isEmpty())
-        return 0;
-    // 段界换算：时间点 at_k 是最终坐标，落在其前的事件累计增量为
-    // cum_{k-1}，故基础坐标段界 b_k = at_k − cum_{k-1}（见 merge.hpp 注释）
-    QList<BreakpointShift> sorted = bps;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const BreakpointShift& a, const BreakpointShift& b) {
-                  return a.at < b.at;
-              });
-    Cs shift = 0, cum = 0;
-    for (const BreakpointShift& b : sorted) {
-        if (baseTime >= b.at - cum)
-            shift = cum + b.delta;
-        cum += b.delta;
-    }
+    // 集内语义：同一文件的点按 at 排序后累加，at ≤ fileTime 的都生效
+    Cs shift = 0;
+    for (const SegmentPoint& p : pts)
+        if (p.fileId == fileId && p.at <= fileTime)
+            shift += p.delta;
     return shift;
 }
 
@@ -254,10 +244,11 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
         {
             EventLine marker;
             marker.isComment = true;
-            // T11：标记同样过时间点校正——用户在集界插了黑场增量后，
-            // 分集注释应标在校正后的真实起点上
-            const Cs base = ep.offset + opt.globalShift;
-            marker.start = marker.end = base + breakpointShiftAt(base, opt.breakpointShifts);
+            // A2：集起点 = 偏移 + 该文件 fileTime 0 处的分段增量（at=0 的点
+            // 会平移整集，包括起点标记）
+            const Cs base = ep.offset + opt.globalShift
+                + segmentWarpAt(ep.fileId, 0, opt.segmentPoints);
+            marker.start = marker.end = base;
             marker.margins[0] = marker.margins[1] = marker.margins[2] =
                 QStringLiteral("0");   // 空值会让 Aegisub 的 lexical_cast 抛异常
             marker.text = QStringLiteral("-- EP%1 starts at %2 (offset %3%4) --")
@@ -286,11 +277,11 @@ MergeResult merge(QList<EpisodeInput> episodes, const MergeOptions& opt)
             // S7：Text 内 {\r} 引用同步重写（只动名字，其余字符零接触）
             rTagTotal += rewriteRTags(ev.text, map);
             // 平移（S5：只动 Start/End；Comment/零时长行同样平移，P3/P4）。
-            // T11：再叠加时间点累积校正——以事件自身的基础时刻判定所在段，
-            // start/end 取同一增量（行内相对时序不变，卡拉OK \k 安全）
+            // A2：叠加分段点校正——按事件在该文件自身时间轴上的位置判定
+            // 生效点，start/end 取同一增量（行内相对时序不变，卡拉OK \k 安全）
             const Cs delta = ep.offset + opt.globalShift +
                              adjustMap.value({ep.fileId, e}, 0);
-            const Cs warp = breakpointShiftAt(delta + ev.start, opt.breakpointShifts);
+            const Cs warp = segmentWarpAt(ep.fileId, ev.start, opt.segmentPoints);
             ev.start += delta + warp;
             ev.end += delta + warp;
             merged.events.push_back(std::move(ev));

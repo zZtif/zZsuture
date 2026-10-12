@@ -89,7 +89,7 @@ struct EpisodeInput {
     Cs      offset = 0;
     quint64 fileId = 0;   // 装载时分配的稳定文件 ID（微调绑定用，与列表位置无关）
     std::optional<Cs> mplsEnd;   // 该集 MPLS 出点（绝对时刻；C1 交叉验证用）
-    enum class OffsetSource { Mpls, Manual, Prefill, Adjusted, Chapter };
+    enum class OffsetSource { Mpls, Manual, Prefill, Adjusted, Chapter, Timeline };
     OffsetSource offsetSource = OffsetSource::Prefill;
 };
 
@@ -99,18 +99,19 @@ struct LineAdjustment {   // F06 单行微调：也是参数，不是修改（D7
     Cs      delta;
 };
 
-// T11 时间点累积校正（所有者设计，v1.4.2 人工主线）：在合并时间轴上设
-// "时间点 + 增量"，从每个时间点起、其后所有行平移该增量，逐点累加——
-// 用于恒定偏移无法表达的结构差异（集间黑屏/转场、段间错位）。增量可负
-// （BD 版删减内容）。常量平移不动行内相对时序，卡拉OK \k 安全。
-struct BreakpointShift {
-    Cs at = 0;       // 时间点（合并时间轴最终坐标，即播放器显示的时刻）
-    Cs delta = 0;    // 从该点起追加的平移量（厘秒）
+// T11/A2 分段点（时间轴交互重定义，需求 v2.0）：归属到集（文件）的时间点，
+// 从该点到该集结束、该集的内容整体平移 delta——不跨集、无隐式联动。
+// at 用该文件自身时间轴（与 event.start 同域），集的偏移移动整集、分段点
+// 只动集内后半段。常量平移不动行内相对时序，卡拉OK \k 安全。
+struct SegmentPoint {
+    quint64 fileId = 0;   // 归属文件（稳定 ID）
+    Cs at = 0;            // 该文件自身时间轴上的位置
+    Cs delta = 0;         // 从该点到该集结束追加的平移量（可负）
 };
 
 struct MergeOptions {
     Cs globalShift = 0;                 // F06 全局微调
-    QList<BreakpointShift> breakpointShifts;   // T11 时间点累积校正
+    QList<SegmentPoint> segmentPoints;  // T11/A2 分段点（集内语义）
     // C2 空档阈值：预填/PlayItem 模式下无缝连播应为 0（默认 2 秒）；章节模式
     // 的集间黑场/ED 空白是常态，由 Session 切为 5 分钟（T8 场景差异化）
     Cs boundaryGapThreshold = 2 * 100;
