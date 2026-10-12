@@ -51,6 +51,9 @@ public:
     bool applyMplsSuggestion();                             // 显式应用（来源标"章节"/MPLS）
     // A1：右侧解析卡片的参考起点表数据（无建议时为空）
     QList<Cs> mplsSuggestedOffsets() const;
+    // A2：时间轴的章节刻度（章节模式下主 PlayItem 的 Entry Mark 相对时刻，
+    // 排序去重；非章节模式返回空）
+    QList<Cs> chapterTicks() const;
     // 字幕第 1 集对应第几个正片（0 基）——整季连播链只合并中间几集的场景
     // （章节模式下无效：分集点来自章节而非 PlayItem 边界）
     void setMplsStartMain(int startMain);
@@ -59,7 +62,11 @@ public:
 
     // ---- 参数（F03 设定与 F06 微调是同一入口）----
     void setOffset(int row, Cs offset, bool fromTimeline = false);
+    // 批量设偏移（时间轴多选拖动）：一次手势 = 一步撤销
+    void setOffsets(const QList<int>& rows, const QList<Cs>& offsets,
+                    bool fromTimeline = false);
     void setGlobalShift(Cs shift);
+    Cs globalShift() const { return options_.globalShift; }   // 时间轴画最终时刻用
 
     // ---- A2：分段点（集内语义）与参数撤销 ----
     void setSegmentPoints(const QList<SegmentPoint>& pts);

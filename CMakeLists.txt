@@ -65,6 +65,8 @@ qt_add_executable(SUture
     src/app/filelistmodel.hpp
     src/app/diagmodel.cpp
     src/app/diagmodel.hpp
+    src/app/timelineview.cpp
+    src/app/timelineview.hpp
     src/app/resources.qrc)
 target_link_libraries(SUture PRIVATE suture-core Qt6::Widgets)
 

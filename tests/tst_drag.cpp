@@ -10,6 +10,7 @@
 #include "filelistmodel.hpp"
 #include "mplsfixture.hpp"
 #include "session.hpp"
+#include "timelineview.hpp"
 
 using suture::testfix::buildMpls;
 using suture::testfix::ticks;
@@ -41,6 +42,8 @@ private slots:
     void chapterPrefillDivergence(); // T8 修正：章节建议与预填背离 → 告警
     void segmentPointsSession();     // T11/A2：分段点集内语义 + 清空恢复
     void undoParams();               // A2：参数快照撤销 + 结构变化清栈
+    void timelineDragBlock();        // F08：拖块改偏移（独立式）+ 撤销
+    void timelineMoveTo();           // F08：内联"移动到"（实测校准形态）
 };
 
 namespace {
@@ -443,6 +446,68 @@ void TestDrag::undoParams()
     QVERIFY(fx.session.canUndo());
     fx.session.moveRows(0, 1, 3);
     QVERIFY(!fx.session.canUndo());
+}
+
+// ---- 时间轴（F08）GUI 用例：模拟真实鼠标/键盘操作 ----
+// 几何换算（TimelineView 私有映射的黑盒等价）：首次内容 refresh 自动适配，
+// viewLeft=-2000、pxPerCs = 宽/(总长+4000)；块带 y = 工具条+标尺+6+半高
+
+void TestDrag::timelineDragBlock()
+{
+    Fixture fx;
+    TimelineView view(&fx.session);
+    view.resize(900, 360);
+    view.show();
+
+    const double pxPerCs = 900.0 / (4.0 * 138000 + 4000);
+    const int y = 34 + 30 + 6 + 46 / 2;
+    const int x = int((138000 + 2000) * pxPerCs) + 20;   // 第 2 集块内
+    const QPoint press(x, y);
+    const QPoint release(x + 80, y);   // 右拖 80px
+
+    QTest::mousePress(&view, Qt::LeftButton, Qt::NoModifier, press);
+    QMouseEvent mv(QEvent::MouseMove, release, view.mapToGlobal(release),
+                   Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &mv);
+    QTest::mouseRelease(&view, Qt::LeftButton, Qt::NoModifier, release);
+
+    // 独立式：第 2 集按 Δ 平移，其它集不动；依据标"时间轴"。
+    // 时间↔像素换算含整数截断，允许 ±2 厘秒容差
+    const Cs delta = Cs(80 / pxPerCs);
+    QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Timeline);
+    QVERIFY(qAbs(fx.session.entry(1).offset - (138000 + delta)) <= 2);
+    QCOMPARE(fx.session.entry(0).offset, Cs(0));
+    QCOMPARE(fx.session.entry(2).offset, Cs(2 * 138000));
+
+    // Ctrl+Z 一步撤销整个手势
+    QTest::keyClick(&view, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(fx.session.entry(1).offset, Cs(138000));
+    QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Prefill);
+}
+
+void TestDrag::timelineMoveTo()
+{
+    Fixture fx;
+    TimelineView view(&fx.session);
+    view.resize(900, 360);
+    view.show();
+    // 单击选中第 1 集块后敲数字 → 内联编辑器 → 回车提交
+    const double pxPerCs = 900.0 / (4.0 * 138000 + 4000);
+    const int x = int(2000 * pxPerCs) + 20;
+    const int y = 34 + 30 + 6 + 46 / 2;
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(x, y));
+    // 首个数字触发内联编辑器并获得焦点；后续按键发给编辑器（真实使用
+    // 中焦点自然转移，QTest 需显式找到编辑器——它不是 view 的焦点代理）
+    QTest::keyClicks(&view, QStringLiteral("0"));
+    auto* edit = view.findChild<QLineEdit*>();
+    QVERIFY(edit);
+    QVERIFY(edit->isVisible());
+    edit->clear();
+    QTest::keyClicks(edit, QStringLiteral("0:10:00.00"));
+    QTest::keyClick(edit, Qt::Key_Return);
+    // 块起点（最终坐标）= 0:10:00 → 偏移 = 60000（全局微调 0）
+    QCOMPARE(fx.session.entry(0).offset, Cs(60000));
+    QCOMPARE(fx.session.entry(0).source, EpisodeInput::OffsetSource::Timeline);
 }
 
 QTEST_MAIN(TestDrag)
