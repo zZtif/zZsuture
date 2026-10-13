@@ -51,11 +51,12 @@ private:
     };
     struct PointInfo {
         Cs pos = 0;      // 最终坐标显示位置（start + at + 前序点累计增量）
-        Cs at = 0;       // fileTime 域原始位置（提交 Session 用）
+        Cs at = 0;       // fileTime 域原始位置
         Cs delta = 0;
     };
     QList<RowInfo> rows_;
-    QList<QList<PointInfo>> points_;   // 每行一个列表（按 at 升序）
+    QList<QList<PointInfo>> points_;   // 分段点数据（UI 已移除，决定 45；
+                                        // 保留供 totalWarp 计算，恒为空）
     QList<Cs> chapterTicks_;
     // A-r2（决定 44）：盘标记叠加层——默认不显示（"蓝点太多"反馈），
     // 解析页"显示映射"开关控制；吸附不受开关影响（章节一直是吸附目标）
@@ -86,12 +87,11 @@ public:
     int pointsY() const { return trackBottom() + 16; }
     int readoutTop() const { return height() - kReadoutH; }
 
-    // ---- 命中测试：点 → row*100000+idx；块 → row；-1 无 ----
-    int hitPoint(const QPoint& pos) const;
+    // ---- 命中测试：块 → row；-1 无 ----
     int hitBlock(const QPoint& pos) const;
 
     // ---- 拖动状态 ----
-    enum class Drag { None, Block, Point, Rubber, Pan };
+    enum class Drag { None, Block, Rubber, Pan };
     Drag drag_ = Drag::None;
     QPoint pressPos_;
     QPoint lastPos_;               // 读数条光标时刻（setMouseTracking）
@@ -100,14 +100,10 @@ public:
     QList<int> dragRows_;          // 块拖动影响的行（多选批量）
     Cs dragGrabOff_ = 0;           // 按下点相对块起点的偏移
     Cs dragOrigStart_ = 0;         // 起始块原起点（算 Δ 用）
-    int dragRow_ = -1;             // 点拖动：行
-    int dragPointIdx_ = -1;        // 点拖动：点下标
     bool dragMoved_ = false;
     Cs previewStart_ = -1;         // 块拖动预览：主块新起点（-1 无预览）
-    Cs previewPointPos_ = -1;      // 点拖动预览：点新显示位置
     QRect rubber_;                 // 框选矩形（widget 坐标）
     QList<int> selection_;         // 选中的行
-    int selPointRow_ = -1, selPointIdx_ = -1;   // 选中的分段点
 
     // ---- 吸附 ----
     bool snapEnabled_ = true;      // 磁铁开关（工具条）
@@ -128,15 +124,12 @@ public:
     // ---- 预览感知取值（拖动中返回预览值）----
     Cs rowFinalStart(int row) const;
     Cs rowFinalEnd(int row) const;     // 块尾 = 起点 + maxEnd + totalWarp
-    QList<SegmentPoint> rowPoints(int row) const;   // 含拖动预览修改
 
     // ---- 操作 ----
-    void commitBlockDrag();
-    void commitPointDrag();
+    void commitBlockDrag(bool solo);   // solo = Alt+拖（只动该块，决定 45）
     void cancelDrag();
-    void nudgeSelection(Cs delta);
-    void deleteSelectedPoint();
-    void addPointAt(int row, Cs finalPos);
+    void nudgeSelection(Cs delta, bool solo);
+    void removeSelectedEpisodes();     // Delete：移除选中的整集（决定 45）
     void zoomAt(const QPoint& center, double factor);
     void fitToContent();
     void buildToolbar();

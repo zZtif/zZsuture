@@ -171,15 +171,11 @@ void TimelineView::refresh()
         points_.append(pis);
     }
 
-    // 防御：行数变化后选中/点选中越界即失效
+    // 防御：行数变化后选中越界即失效
     if (drag_ == Drag::None) {
         selection_.erase(std::remove_if(selection_.begin(), selection_.end(),
                                         [this](int r) { return r >= rows_.size(); }),
                          selection_.end());
-        if (selPointRow_ >= rows_.size() || selPointRow_ < 0) {
-            selPointRow_ = -1;
-            selPointIdx_ = -1;
-        }
     }
 
     if (!fitted_ && !rows_.isEmpty()) {
@@ -225,44 +221,6 @@ Cs TimelineView::rowFinalStart(int row) const
 Cs TimelineView::rowFinalEnd(int row) const
 {
     return rowFinalStart(row) + rows_[row].maxEnd + rows_[row].totalWarp;
-}
-
-QList<SegmentPoint> TimelineView::rowPoints(int row) const
-{
-    QList<SegmentPoint> out;
-    for (const PointInfo& pi : points_[row]) {
-        SegmentPoint sp;
-        sp.fileId = rows_[row].fileId;
-        sp.at = pi.at;
-        sp.delta = pi.delta;
-        out.append(sp);
-    }
-    // 点拖动预览：把被拖的点挪到预览位置（换算回 fileTime 域）
-    if (drag_ == Drag::Point && dragRow_ == row && previewPointPos_ >= 0) {
-        const Cs rowStart = rowFinalStart(row);
-        Cs cum = 0;
-        for (int k = 0; k < out.size(); ++k) {
-            if (k == dragPointIdx_) {
-                out[k].at = std::max(Cs(0), previewPointPos_ - rowStart - cum);
-                break;
-            }
-            cum += out[k].delta;
-        }
-    }
-    return out;
-}
-
-// ---------------------------------------------------------------- 命中测试
-
-int TimelineView::hitPoint(const QPoint& pos) const
-{
-    if (std::abs(pos.y() - pointsY()) > 9)
-        return -1;
-    for (int r = 0; r < points_.size(); ++r)
-        for (int k = 0; k < points_[r].size(); ++k)
-            if (std::abs(timeToX(points_[r][k].pos) - pos.x()) <= 7)
-                return r * 100000 + k;
-    return -1;
 }
 
 int TimelineView::hitBlock(const QPoint& pos) const
@@ -477,29 +435,6 @@ void TimelineView::drawTrack(QPainter& p) const
         }
     }
 
-    // 分段点（菱形 + 与块的连线）
-    for (int r = 0; r < points_.size(); ++r) {
-        for (int k = 0; k < points_[r].size(); ++k) {
-            const bool isDrag = drag_ == Drag::Point && dragRow_ == r
-                                && dragPointIdx_ == k;
-            const Cs pos = (isDrag && previewPointPos_ >= 0) ? previewPointPos_
-                                                             : points_[r][k].pos;
-            const int x = timeToX(pos);
-            if (x < -10 || x > width() + 10)
-                continue;
-            const bool sel = selPointRow_ == r && selPointIdx_ == k;
-            p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 120), 1));
-            p.drawLine(x, trackBottom(), x, pointsY());
-            p.setPen(QPen(sel ? QColor(0xff, 0xff, 0xff) : QColor(0x4f, 0x8c, 0xff),
-                          sel ? 2 : 1));
-            p.setBrush(isDrag ? QColor(0xff, 0xb0, 0x40) : QColor(0x4f, 0x8c, 0xff));
-            QPolygon dia;
-            dia << QPoint(x, pointsY() - 6) << QPoint(x + 5, pointsY())
-                << QPoint(x, pointsY() + 6) << QPoint(x - 5, pointsY());
-            p.drawPolygon(dia);
-        }
-    }
-
     // 吸附指示（决定 28：看得见的吸附才不是误操作）
     if (drag_ != Drag::None && snapTarget_ >= 0) {
         const int x = timeToX(snapTarget_);
@@ -540,7 +475,7 @@ void TimelineView::drawReadout(QPainter& p) const
                    .arg(selection_.first() + 1)
                    .arg(formatCs(rowFinalStart(selection_.first())));
     } else {
-        left = tr("单击选块，拖动移动；右键加分段点；滚轮缩放");
+        left = tr("单击选块，拖动移动（后面的集跟着平移）；滚轮缩放");
     }
     const QString right = rows_.isEmpty()
         ? QString() : tr("光标 %1").arg(formatCs(xToTime(lastPos_.x())));
@@ -601,19 +536,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e)
     pressPos_ = e->pos();
     dragMoved_ = false;
     previewStart_ = -1;
-    previewPointPos_ = -1;
     snapTarget_ = -1;
-
-    if (const int h = hitPoint(e->pos()); h >= 0) {
-        selPointRow_ = h / 100000;
-        selPointIdx_ = h % 100000;
-        selection_.clear();
-        drag_ = Drag::Point;
-        dragRow_ = selPointRow_;
-        dragPointIdx_ = selPointIdx_;
-        return;
-    }
-    selPointRow_ = selPointIdx_ = -1;
 
     if (const int r = hitBlock(e->pos()); r >= 0) {
         if (e->modifiers() & Qt::ControlModifier) {
@@ -660,8 +583,8 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
             (e->pos().y() >= trackBottom() && e->pos().y() < readoutTop())
             || (e->pos().y() >= rulerTop() && e->pos().y() < rulerBottom());
         setCursor(overPanZone ? Qt::SizeHorCursor
-                              : (hitPoint(e->pos()) >= 0 || hitBlock(e->pos()) >= 0
-                                     ? Qt::SizeAllCursor : Qt::ArrowCursor));
+                              : (hitBlock(e->pos()) >= 0 ? Qt::SizeAllCursor
+                                                         : Qt::ArrowCursor));
         update();   // 读数条光标时刻
         return;
     }
@@ -695,25 +618,6 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
         return;
     }
 
-    if (drag_ == Drag::Point) {
-        Cs raw = xToTime(e->pos().x());
-        const Cs rowStart = rowFinalStart(dragRow_);
-        if (raw < rowStart)
-            raw = rowStart;   // 点不越过本集起点
-        Cs target = raw;
-        if (snapEnabled_ && !(e->modifiers() & Qt::AltModifier)) {
-            const Cs hit = snapCandidate(raw, dragRow_);
-            if (hit >= 0 && hit >= rowStart)
-                target = hit;
-        }
-        snapTarget_ = (target != raw) ? target : Cs(-1);
-        previewPointPos_ = target;
-        if (target != points_[dragRow_][dragPointIdx_].pos)
-            dragMoved_ = true;
-        update();
-        return;
-    }
-
     if (drag_ == Drag::Rubber) {
         rubber_ = QRect(pressPos_, e->pos()).normalized();
         QList<int> sel;
@@ -736,13 +640,10 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* e)
     if (e->button() != Qt::LeftButton && e->button() != Qt::MiddleButton)
         return;
     if (drag_ == Drag::Block && dragMoved_)
-        commitBlockDrag();
-    else if (drag_ == Drag::Point && dragMoved_)
-        commitPointDrag();
+        commitBlockDrag(e->modifiers() & Qt::AltModifier);
     drag_ = Drag::None;
     dragRows_.clear();
     previewStart_ = -1;
-    previewPointPos_ = -1;
     snapTarget_ = -1;
     rubber_ = QRect();
     update();
@@ -793,7 +694,7 @@ void TimelineView::keyPressEvent(QKeyEvent* e)
         const bool left = e->key() == Qt::Key_Left;
         // 决定 41 两用语义：无选中（块与点都无）= 平移视口（长按连续），
         // 有选中 = ±0.1 秒移动选中块（Shift ±1 秒）
-        if (selection_.isEmpty() && selPointRow_ < 0) {
+        if (selection_.isEmpty()) {
             userAdjustedView_ = true;
             const Cs step = Cs(40.0 / pxPerCs_)   // 一次约 40px，自动重复即连续滚动
                             * ((e->modifiers() & Qt::ShiftModifier) ? 4 : 1);
@@ -802,12 +703,13 @@ void TimelineView::keyPressEvent(QKeyEvent* e)
             return;
         }
         const Cs step = (e->modifiers() & Qt::ShiftModifier) ? Cs(100) : Cs(10);
-        nudgeSelection(left ? -step : step);
+        nudgeSelection(left ? -step : step,
+                       e->modifiers() & Qt::AltModifier);
         return;
     }
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
-        deleteSelectedPoint();
+        removeSelectedEpisodes();
         return;
     case Qt::Key_Escape:
         cancelDrag();
@@ -835,98 +737,68 @@ void TimelineView::keyPressEvent(QKeyEvent* e)
     QWidget::keyPressEvent(e);
 }
 
-void TimelineView::nudgeSelection(Cs delta)
+void TimelineView::nudgeSelection(Cs delta, bool solo)
 {
-    if (selPointRow_ >= 0 && selPointIdx_ >= 0 && selPointRow_ < points_.size()
-        && selPointIdx_ < points_[selPointRow_].size()) {
-        // 键盘微调选中的分段点
-        const quint64 fid = rows_[selPointRow_].fileId;
-        QList<SegmentPoint> rowPts = rowPoints(selPointRow_);
-        rowPts[selPointIdx_].at = std::max(Cs(0), rowPts[selPointIdx_].at + delta);
-        QList<SegmentPoint> next;
-        for (const SegmentPoint& sp : s_->segmentPoints())
-            if (sp.fileId != fid)
-                next.append(sp);
-        next.append(rowPts);
-        s_->setSegmentPoints(next);
-        return;
-    }
     if (selection_.isEmpty())
         return;
+    const Cs gs = s_->globalShift();
     QList<int> rows;
     QList<Cs> offs;
-    const Cs gs = s_->globalShift();
-    for (int r : selection_) {
-        if (r < 0 || r >= rows_.size())
-            continue;
-        rows.append(r);
-        offs.append(std::max(Cs(0), rows_[r].start + delta - gs));
+    // 与拖动同语义（决定 45）：单选 = 涟漪（该集及其后），Alt = 单块，
+    // 多选 = 组移动
+    if (selection_.size() == 1 && !solo) {
+        const int r = selection_.first();
+        for (int k = r; k < rows_.size(); ++k) {
+            rows.append(k);
+            offs.append(std::max(Cs(0), rows_[k].start + delta - gs));
+        }
+    } else {
+        for (int r : selection_) {
+            if (r < 0 || r >= rows_.size())
+                continue;
+            rows.append(r);
+            offs.append(std::max(Cs(0), rows_[r].start + delta - gs));
+        }
     }
     if (!rows.isEmpty())
         s_->setOffsets(rows, offs, true);
 }
 
-void TimelineView::deleteSelectedPoint()
+void TimelineView::removeSelectedEpisodes()
 {
-    if (selPointRow_ < 0 || selPointRow_ >= points_.size() || selPointIdx_ < 0
-        || selPointIdx_ >= points_[selPointRow_].size())
+    if (selection_.isEmpty())
         return;
-    const quint64 fid = rows_[selPointRow_].fileId;
-    QList<SegmentPoint> next;
-    for (const SegmentPoint& sp : s_->segmentPoints())
-        if (sp.fileId != fid)
-            next.append(sp);
-    s_->setSegmentPoints(next);
-    selPointRow_ = selPointIdx_ = -1;
+    // 决定 45：Delete = 移除选中的整集（结构变化：清撤销栈，不可 Ctrl+Z，
+    // 帮助速查表中已标注）
+    s_->removeRows(selection_);
+    selection_.clear();
 }
 
-void TimelineView::addPointAt(int row, Cs finalPos)
-{
-    if (row < 0 || row >= rows_.size())
-        return;
-    SegmentPoint sp;
-    sp.fileId = rows_[row].fileId;
-    sp.at = std::max(Cs(0), finalPos - rowFinalStart(row));
-    sp.delta = 0;
-    QList<SegmentPoint> next = s_->segmentPoints();
-    next.append(sp);
-    s_->setSegmentPoints(next);
-    // 选中新增点，便于接着拖动/微调（refresh 后下标对齐）
-    selPointRow_ = row;
-    selPointIdx_ = static_cast<int>(points_[row].size());
-}
-
-// ---------------------------------------------------------------- 提交
-
-void TimelineView::commitBlockDrag()
+void TimelineView::commitBlockDrag(bool solo)
 {
     if (dragRows_.isEmpty() || previewStart_ < 0)
         return;
     const Cs delta = previewStart_ - dragOrigStart_;
+    const Cs gs = s_->globalShift();
     QList<int> rows;
     QList<Cs> offs;
-    const Cs gs = s_->globalShift();
-    for (int r : dragRows_) {
+    // 决定 45 涟漪语义：单选拖动 = 该集及其后全部平移（修好一个交界，
+    // 后面的集顺势就位）；Alt+拖 = 只动该块；多选拖 = 组移动不涟漪
+    const bool ripple = dragRows_.size() == 1 && !solo;
+    const int from = ripple ? dragRows_.first() : 0;
+    const int to = ripple ? rows_.size() : 0;
+    for (int r : (ripple ? QList<int>() : dragRows_)) {
         if (r < 0 || r >= rows_.size())
             continue;
         rows.append(r);
         offs.append(std::max(Cs(0), rows_[r].start + delta - gs));
     }
+    for (int r = from; r < to; ++r) {
+        rows.append(r);
+        offs.append(std::max(Cs(0), rows_[r].start + delta - gs));
+    }
     if (!rows.isEmpty())
         s_->setOffsets(rows, offs, true);   // 一次手势 = 一步撤销
-}
-
-void TimelineView::commitPointDrag()
-{
-    if (dragRow_ < 0 || dragRow_ >= rows_.size() || previewPointPos_ < 0)
-        return;
-    const quint64 fid = rows_[dragRow_].fileId;
-    QList<SegmentPoint> next;
-    for (const SegmentPoint& sp : s_->segmentPoints())
-        if (sp.fileId != fid)
-            next.append(sp);
-    next.append(rowPoints(dragRow_));   // 含预览位置换算回 fileTime
-    s_->setSegmentPoints(next);
 }
 
 void TimelineView::cancelDrag()
@@ -937,7 +809,6 @@ void TimelineView::cancelDrag()
     }
     drag_ = Drag::None;
     previewStart_ = -1;
-    previewPointPos_ = -1;
     snapTarget_ = -1;
     update();
 }
@@ -955,7 +826,7 @@ void TimelineView::ensureMoveEditor()
         const auto cs = parseTimeToCs(moveEdit_->text());
         if (cs.has_value() && moveRow_ >= 0 && moveRow_ < rows_.size()) {
             const Cs gs = s_->globalShift();
-            s_->setOffset(moveRow_, std::max(Cs(0), *cs - gs), true);
+            s_->setOffsetRipple(moveRow_, std::max(Cs(0), *cs - gs), true);
         }
         moveEdit_->hide();
     });
@@ -978,14 +849,7 @@ void TimelineView::openMoveEditor(int row, const QString& initial)
 void TimelineView::contextMenuEvent(QContextMenuEvent* e)
 {
     QMenu menu(this);
-    if (const int h = hitPoint(e->pos()); h >= 0) {
-        selPointRow_ = h / 100000;
-        selPointIdx_ = h % 100000;
-        menu.addAction(tr("删除分段点"), this, &TimelineView::deleteSelectedPoint);
-    } else if (const int r = hitBlock(e->pos()); r >= 0) {
-        const Cs t = xToTime(e->pos().x());
-        menu.addAction(tr("在此处添加分段点"), this,
-                       [this, r, t] { addPointAt(r, t); });
+    if (const int r = hitBlock(e->pos()); r >= 0) {
         menu.addAction(tr("移动到…"), this, [this, r] {
             selection_ = {r};
             openMoveEditor(r, QString());

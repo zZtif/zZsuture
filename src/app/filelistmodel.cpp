@@ -85,7 +85,9 @@ bool FileListModel::setData(const QModelIndex& idx, const QVariant& v, int role)
     const auto cs = parseTimeToCs(v.toString());
     if (!cs)
         return false;   // 非法输入：不改值，单元格回显原值
-    s_->setOffset(idx.row(), *cs);
+    // A-r2 决定 45：偏移列改值与时间轴拖动同涟漪语义（改这一集 = 其后
+    // 所有集跟着平移），同一操作不做两套规则
+    s_->setOffsetRipple(idx.row(), *cs);
     return true;
 }
 
