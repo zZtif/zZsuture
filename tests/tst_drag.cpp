@@ -472,18 +472,32 @@ void TestDrag::timelineDragBlock()
     QApplication::sendEvent(&view, &mv);
     QTest::mouseRelease(&view, Qt::LeftButton, Qt::NoModifier, release);
 
-    // 独立式：第 2 集按 Δ 平移，其它集不动；依据标"时间轴"。
-    // 时间↔像素换算含整数截断，允许 ±2 厘秒容差
+    // 涟漪（决定 45）：第 2 集按 Δ 平移，其后的 3/4 集同 Δ 跟随，
+    // 第 1 集不动；依据标"时间轴"。整数截断允许 ±2 厘秒
     const Cs delta = Cs(80 / pxPerCs);
     QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Timeline);
     QVERIFY(qAbs(fx.session.entry(1).offset - (138000 + delta)) <= 2);
     QCOMPARE(fx.session.entry(0).offset, Cs(0));
-    QCOMPARE(fx.session.entry(2).offset, Cs(2 * 138000));
+    QVERIFY(qAbs(fx.session.entry(2).offset - (2 * 138000 + delta)) <= 2);
+    QVERIFY(qAbs(fx.session.entry(3).offset - (3 * 138000 + delta)) <= 2);
 
-    // Ctrl+Z 一步撤销整个手势
+    // Ctrl+Z 一步撤销整个手势（含涟漪的所有行）
     QTest::keyClick(&view, Qt::Key_Z, Qt::ControlModifier);
     QCOMPARE(fx.session.entry(1).offset, Cs(138000));
+    QCOMPARE(fx.session.entry(2).offset, Cs(2 * 138000));
     QCOMPARE(fx.session.entry(1).source, EpisodeInput::OffsetSource::Prefill);
+
+    // Alt+拖 = 只动该块（决定 45：个别集误差不同的兜底）
+    QTest::mousePress(&view, Qt::LeftButton, Qt::NoModifier, press);
+    QMouseEvent mv2(QEvent::MouseMove, release, view.mapToGlobal(release),
+                    Qt::NoButton, Qt::LeftButton, Qt::AltModifier);
+    QApplication::sendEvent(&view, &mv2);
+    QMouseEvent rel2(QEvent::MouseButtonRelease, release,
+                     view.mapToGlobal(release), Qt::LeftButton, Qt::NoButton,
+                     Qt::AltModifier);
+    QApplication::sendEvent(&view, &rel2);
+    QVERIFY(qAbs(fx.session.entry(1).offset - (138000 + delta)) <= 2);
+    QCOMPARE(fx.session.entry(2).offset, Cs(2 * 138000));   // 后面不动
 }
 
 void TestDrag::timelineMoveTo()

@@ -198,6 +198,24 @@ void Session::setOffsets(const QList<int>& rows, const QList<Cs>& offsets,
     emit resultChanged();
 }
 
+void Session::setOffsetRipple(int row, Cs offset, bool fromTimeline)
+{
+    if (row < 0 || row >= count())
+        return;
+    pushUndo();
+    const Cs delta = offset - entries_[size_t(row)].offset;
+    const auto src = fromTimeline ? EpisodeInput::OffsetSource::Timeline
+                                  : EpisodeInput::OffsetSource::Manual;
+    for (int i = row; i < count(); ++i) {
+        Entry& e = entries_[size_t(i)];
+        e.offset = (i == row) ? offset : e.offset + delta;
+        e.source = src;   // 涟漪被移动的行同样定案，依据可区分
+    }
+    remerge();
+    emit paramsChanged();
+    emit resultChanged();
+}
+
 void Session::setGlobalShift(Cs shift)
 {
     pushUndo();
