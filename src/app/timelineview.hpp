@@ -47,6 +47,9 @@ private:
         Cs contentFirst = 0;  // 该集最早内容（fileTime 域）
         Cs maxEnd = 0;        // 该集最晚结束（fileTime 域）
         Cs totalWarp = 0;     // 该集全部分段点增量之和（画块尾用）
+        QString firstText;    // 首句台词（去特效标签，截断；悬停显示）
+        QString lastText;     // 末句台词（结束最晚那行）
+        Cs lastStart = 0;     // 末句那行的开始（fileTime 域）
         QColor color;
     };
     struct PointInfo {
@@ -104,6 +107,7 @@ public:
     Cs previewStart_ = -1;         // 块拖动预览：主块新起点（-1 无预览）
     QRect rubber_;                 // 框选矩形（widget 坐标）
     QList<int> selection_;         // 选中的行
+    int hoverRow_ = -1;            // 悬停中的块（tooltip 内容变化时才重设）
 
     // ---- 吸附 ----
     bool snapEnabled_ = true;      // 磁铁开关（工具条）
