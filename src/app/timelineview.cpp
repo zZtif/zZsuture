@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -57,6 +58,17 @@ QBrush hatchBrush()
         inited = true;
     }
     return b;
+}
+
+// 台词文本清洗：去掉 {\...} 特效标签、压缩空白、截断 24 字（悬停显示用）
+QString cleanLine(QString t)
+{
+    static const QRegularExpression tags(QStringLiteral("\\{[^}]*\\}"));
+    t.remove(tags);
+    t = t.simplified();
+    if (t.size() > 24)
+        t = t.left(24) + QStringLiteral("…");
+    return t;
 }
 
 // 标尺标签：亚秒级主刻度用短格式（4:09.2），常规 H:MM:SS
@@ -139,13 +151,22 @@ void TimelineView::refresh()
         r.row = i;
         r.fileId = e.sub->id;
         r.start = e.offset + gs;
-        // 内容范围（fileTime 域）：最早的非 Comment 非零时长行
+        // 内容范围（fileTime 域）：最早的非 Comment 非零时长行 = 首句；
+        // 结束最晚的那行 = 末句（决定 47：标记 + 悬停台词）
         Cs first = -1;
+        Cs lastEnd = -1;
         for (const EventLine& ev : e.doc->events) {
             if (ev.isComment || ev.zeroDuration())
                 continue;
-            if (first < 0 || ev.start < first)
+            if (first < 0 || ev.start < first) {
                 first = ev.start;
+                r.firstText = cleanLine(ev.text);
+            }
+            if (ev.end > lastEnd) {
+                lastEnd = ev.end;
+                r.lastStart = ev.start;
+                r.lastText = cleanLine(ev.text);
+            }
         }
         r.contentFirst = first < 0 ? 0 : first;
         r.maxEnd = e.doc->maxDialogueEnd;
@@ -427,6 +448,24 @@ void TimelineView::drawTrack(QPainter& p) const
             c.setAlpha(220);
             p.fillRect(cx1, trackTop() + kTrackH / 2 - 4, x2 - cx1, 8, c);
         }
+        // 首末句标记（决定 47）：首句开始（白▲，对轴主锚点——播放器听到的
+        // 台词时刻对这里）、末句结束（黄▼，该集内容实际终点，检查是否压到
+        // 下一集）。放大后可与标尺刻度精确对齐
+        if (x2 - x1 > 26) {
+            const int fx = timeToX(rowFinalStart(r) + ri.contentFirst + warpFirst);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0xff, 0xff, 0xff, 230));
+            QPolygon up;
+            up << QPoint(fx - 4, trackTop() + 5) << QPoint(fx + 4, trackTop() + 5)
+               << QPoint(fx, trackTop() + 12);
+            p.drawPolygon(up);
+            p.setBrush(QColor(0xe8, 0xc2, 0x68, 230));
+            QPolygon down;
+            down << QPoint(x2 - 5, trackTop() + kTrackH - 5)
+                 << QPoint(x2 + 3, trackTop() + kTrackH - 5)
+                 << QPoint(x2 - 1, trackTop() + kTrackH - 12);
+            p.drawPolygon(down);
+        }
         if (x2 - x1 > 34) {
             p.setPen(QColor(0xff, 0xff, 0xff, 220));
             p.drawText(QRect(x1 + 6, trackTop(), x2 - x1 - 8, kTrackH),
@@ -585,6 +624,27 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
         setCursor(overPanZone ? Qt::SizeHorCursor
                               : (hitBlock(e->pos()) >= 0 ? Qt::SizeAllCursor
                                                          : Qt::ArrowCursor));
+        // 悬停块 → 首/末句台词（决定 47；通用悬停管道，内容以后随便扩展）。
+        // 时刻用最终坐标——那就是"现在导出的话播放器会显示的时间"，
+        // 与播放器读数直接可比；调轴闭环：听到台词时刻 ↔ 悬停看现在的位置
+        const int hr = hitBlock(e->pos());
+        if (hr != hoverRow_) {
+            hoverRow_ = hr;
+            if (hr < 0) {
+                setToolTip(QString());
+            } else {
+                const RowInfo& ri = rows_[hr];
+                const Cs base = rowFinalStart(hr);
+                setToolTip(tr("第%1集\n"
+                              "首句 %2 起「%3」\n"
+                              "末句 %4 止「%5」")
+                               .arg(hr + 1)
+                               .arg(formatCs(base + ri.contentFirst),
+                                    ri.firstText,
+                                    formatCs(base + ri.maxEnd + ri.totalWarp),
+                                    ri.lastText));
+            }
+        }
         update();   // 读数条光标时刻
         return;
     }
