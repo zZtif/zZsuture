@@ -57,6 +57,14 @@ private:
     QList<RowInfo> rows_;
     QList<QList<PointInfo>> points_;   // 每行一个列表（按 at 升序）
     QList<Cs> chapterTicks_;
+    // A-r2（决定 44）：盘标记叠加层——默认不显示（"蓝点太多"反馈），
+    // 解析页"显示映射"开关控制；吸附不受开关影响（章节一直是吸附目标）
+    QList<Cs> discSuggests_;   // 建议分集点（叠加时带 EP 标签）
+    QList<Cs> discEds_;        // ED 锚定章节（叠加时黄色小三角）
+    bool discOverlay_ = false;
+
+public:
+    void setDiscOverlay(bool on) { discOverlay_ = on; update(); }
 
     // ---- 视口（时间 ↔ 像素）----
     double pxPerCs_ = 0.02;   // 约 1px=0.5s；首个内容 refresh 时适配

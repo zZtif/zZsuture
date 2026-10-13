@@ -347,6 +347,16 @@ QList<Cs> Session::chapterTicks() const
     return out;
 }
 
+QList<Cs> Session::edAnchorTicks() const
+{
+    return chapterSuggestion_ ? chapterSuggestion_->edAnchorMarks : QList<Cs>{};
+}
+
+QStringList Session::mplsEpBasis() const
+{
+    return chapterSuggestion_ ? chapterSuggestion_->epBasis : QStringList{};
+}
+
 bool Session::applyMplsSuggestion()
 {
     if (chapterSuggestion_.has_value()) {

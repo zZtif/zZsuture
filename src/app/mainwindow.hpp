@@ -5,7 +5,7 @@
 
 class QDoubleSpinBox;
 class QLabel;
-class QTableWidget;
+class QTabWidget;
 class QTableView;
 
 namespace suture {
@@ -30,7 +30,6 @@ private:
     void exportMerged();
     void refreshDiags();
     void refreshStatus();
-    void refreshSuggestTable();    // A1：原盘解析卡片的参考起点表
 
     Session*      session_;
     FileListModel* fileModel_;
@@ -38,8 +37,8 @@ private:
     FileTableView* fileTable_ = nullptr;
     QTableView*   diagTable_ = nullptr;
     TimelineView* timeline_ = nullptr;       // A2：时间轴主视图
-    QTableWidget* suggestTable_ = nullptr;   // 原盘解析卡片：参考起点表
-    QLabel*       suggestPlaceholder_ = nullptr;
+    QTabWidget*   fileTabs_ = nullptr;       // A-r2：[文件] [原盘解析] 页签
+    class DiscAxisView* discAxis_ = nullptr; // A-r2：解析页纯数轴
     QLabel*       statusLabel_ = nullptr;
 };
 

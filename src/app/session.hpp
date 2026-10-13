@@ -54,6 +54,9 @@ public:
     // A2：时间轴的章节刻度（章节模式下主 PlayItem 的 Entry Mark 相对时刻，
     // 排序去重；非章节模式返回空）
     QList<Cs> chapterTicks() const;
+    // A-r2（决定 43）：解析页纯数轴的标记数据
+    QList<Cs> edAnchorTicks() const;      // 每集实际用于锚定的盘章节（-1 无）
+    QStringList mplsEpBasis() const;      // 每集锚定依据（空串无）
     // 字幕第 1 集对应第几个正片（0 基）——整季连播链只合并中间几集的场景
     // （章节模式下无效：分集点来自章节而非 PlayItem 边界）
     void setMplsStartMain(int startMain);

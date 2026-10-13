@@ -15,6 +15,7 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QStringList>
 #include <optional>
 #include <vector>
 
@@ -78,6 +79,10 @@ struct ChapterMapping {
     QString clip;               // 多集 m2ts 的 clip 名（F07 同名导出用）
     QList<Cs> offsets;          // 每集建议起点（m2ts 文件内相对位置，第 1 集通常 0）
     QList<Cs> episodeEnds;      // 建议集界 = 下一集起点（末集 = 项时长），C1 用
+    // A-r2（决定 43）：解析页纯数轴的标记数据——每集实际用于锚定的盘章节
+    // （▽ 疑似片尾曲起点）与锚定依据（悬停详情）；未锚定的集为 -1 / 空串
+    QList<Cs> edAnchorMarks;
+    QStringList epBasis;
 };
 
 // 算法（黑契 36 章/死后文 29 章双盘数据标定 + 死后文实测 bug 修正）：

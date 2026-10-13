@@ -128,6 +128,8 @@ void TimelineView::refresh()
     rows_.clear();
     points_.clear();
     chapterTicks_ = s_->chapterTicks();
+    discSuggests_ = s_->mplsSuggestedOffsets();
+    discEds_ = s_->edAnchorTicks();
     const Cs gs = s_->globalShift();
 
     const QList<SegmentPoint> allPts = s_->segmentPoints();
@@ -362,19 +364,41 @@ void TimelineView::drawRuler(QPainter& p) const
         p.setPen(QPen(QColor(0x3a, 0x3d, 0x47), 1));
         p.drawLine(timeToX(t), rulerBottom() - 4, timeToX(t), rulerBottom());
     }
-    // 章节刻度：强调色菱形 + 贯穿轨道的淡线
-    for (Cs t : chapterTicks_) {
-        const int x = timeToX(t);
-        if (x < -10 || x > width() + 10)
-            continue;
-        p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 0x50), 1));
-        p.drawLine(x, rulerBottom(), x, readoutTop());
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0x4f, 0x8c, 0xff));
-        QPolygon dia;
-        dia << QPoint(x, rulerBottom() - 9) << QPoint(x + 4, rulerBottom() - 5)
-            << QPoint(x, rulerBottom() - 1) << QPoint(x - 4, rulerBottom() - 5);
-        p.drawPolygon(dia);
+    // 盘标记叠加（决定 44）：默认不画——章节一直是吸附目标但不必常显
+    // （"蓝点那么多"的反馈）；解析页"显示映射"开关开启才叠加：
+    // 建议分集点 = 强调色线 + EP 标签；ED 锚定 = 黄色小三角；章节 = 极淡线
+    if (discOverlay_) {
+        for (Cs t : chapterTicks_) {
+            const int x = timeToX(t);
+            if (x < -10 || x > width() + 10)
+                continue;
+            p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 25), 1));
+            p.drawLine(x, rulerBottom(), x, readoutTop());
+        }
+        for (Cs t : discEds_) {
+            if (t < 0)
+                continue;
+            const int x = timeToX(t);
+            if (x < -10 || x > width() + 10)
+                continue;
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0xe8, 0xc2, 0x68));
+            QPolygon tri;
+            tri << QPoint(x - 4, rulerBottom() - 9) << QPoint(x + 4, rulerBottom() - 9)
+                << QPoint(x, rulerBottom() - 2);
+            p.drawPolygon(tri);
+        }
+        p.setFont(QFont(p.font().family(), 8));
+        for (int k = 0; k < discSuggests_.size(); ++k) {
+            const int x = timeToX(discSuggests_[k]);
+            if (x < -30 || x > width() + 30)
+                continue;
+            p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 110), 1));
+            p.drawLine(x, rulerBottom(), x, readoutTop());
+            p.setPen(QColor(0x9d, 0xbe, 0xff));
+            p.drawText(QRect(x - 24, rulerBottom() + 2, 48, 12), Qt::AlignHCenter,
+                       QStringLiteral("EP%1").arg(k + 1));
+        }
     }
     p.setPen(QPen(QColor(0x33, 0x36, 0x3f), 1));
     p.drawLine(0, rulerBottom(), width(), rulerBottom());

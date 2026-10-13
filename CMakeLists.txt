@@ -65,6 +65,8 @@ qt_add_executable(SUture
     src/app/filelistmodel.hpp
     src/app/diagmodel.cpp
     src/app/diagmodel.hpp
+    src/app/discaxisview.cpp
+    src/app/discaxisview.hpp
     src/app/timelineview.cpp
     src/app/timelineview.hpp
     src/app/resources.qrc)
