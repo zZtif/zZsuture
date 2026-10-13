@@ -44,6 +44,7 @@ private slots:
     void undoParams();               // A2：参数快照撤销 + 结构变化清栈
     void timelineDragBlock();        // F08：拖块改偏移（独立式）+ 撤销
     void timelineMoveTo();           // F08：内联"移动到"（实测校准形态）
+    void timelinePan();              // A-r2：块下方拖动平移 + ←→ 两用语义
 };
 
 namespace {
@@ -508,6 +509,57 @@ void TestDrag::timelineMoveTo()
     // 块起点（最终坐标）= 0:10:00 → 偏移 = 60000（全局微调 0）
     QCOMPARE(fx.session.entry(0).offset, Cs(60000));
     QCOMPARE(fx.session.entry(0).source, EpisodeInput::OffsetSource::Timeline);
+}
+
+void TestDrag::timelinePan()
+{
+    Fixture fx;
+    TimelineView view(&fx.session);
+    view.resize(900, 360);
+    view.show();
+    const double pxPerCs = 900.0 / (4.0 * 138000 + 4000);
+    const int y = 34 + 30 + 6 + 46 / 2;              // 块带中线
+    const int yBelow = 34 + 30 + 6 + 46 + 30;        // 块下方平移区
+    Q_UNUSED(pxPerCs)
+
+    // 对照：平移前 ←→ 两用——无选中时 ← 平移，任何偏移都不动
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(50, yBelow));
+    QTest::keyClick(&view, Qt::Key_Right);
+    QCOMPARE(fx.session.entry(0).offset, Cs(0));
+    QCOMPARE(fx.session.entry(1).offset, Cs(138000));
+
+    // 对照：有选中时 ← = 移动块（-0.1 秒）
+    const int x2 = int((138000 + 2000) * pxPerCs) + 20;   // 第 2 集块内
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(x2, y));
+    QTest::keyClick(&view, Qt::Key_Left);
+    QCOMPARE(fx.session.entry(1).offset, Cs(138000 - 10));
+
+    // 块下方左键拖动 100px = 平移视口：所有偏移不变
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier,
+                      QPoint(50, yBelow));   // 先清空选择
+    QTest::mousePress(&view, Qt::LeftButton, Qt::NoModifier, QPoint(300, yBelow));
+    QMouseEvent mv(QEvent::MouseMove, QPoint(400, yBelow),
+                   view.mapToGlobal(QPoint(400, yBelow)),
+                   Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &mv);
+    QTest::mouseRelease(&view, Qt::LeftButton, Qt::NoModifier, QPoint(400, yBelow));
+    QCOMPARE(fx.session.entry(0).offset, Cs(0));
+    QCOMPARE(fx.session.entry(1).offset, Cs(138000 - 10));   // 平移不改数据
+
+    // 平移 100px 后块 1 起点从 x≈3 移到 x≈103：原位置 (50,y) 变空白，
+    // 点击不再选中任何块 → ← 键是平移而非移动，偏移保持不变
+    QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(50, y));
+    QTest::keyClick(&view, Qt::Key_Left);
+    QCOMPARE(fx.session.entry(1).offset, Cs(138000 - 10));
+
+    // 中键平移同样只动视口不动数据
+    QTest::mousePress(&view, Qt::MiddleButton, Qt::NoModifier, QPoint(300, y));
+    QMouseEvent mv2(QEvent::MouseMove, QPoint(500, y),
+                    view.mapToGlobal(QPoint(500, y)),
+                    Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+    QApplication::sendEvent(&view, &mv2);
+    QTest::mouseRelease(&view, Qt::MiddleButton, Qt::NoModifier, QPoint(500, y));
+    QCOMPARE(fx.session.entry(0).offset, Cs(0));
 }
 
 QTEST_MAIN(TestDrag)
