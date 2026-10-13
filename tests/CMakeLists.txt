@@ -18,7 +18,8 @@ suture_add_test(tst_roundtrip)   # 阶段 1 验收：六组全量往返
 add_executable(tst_drag tst_drag.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/filelistmodel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/timelineview.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/timelineview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/app/discaxisview.cpp)
 target_include_directories(tst_drag PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/app)
 target_link_libraries(tst_drag PRIVATE suture-core Qt6::Test Qt6::Widgets)

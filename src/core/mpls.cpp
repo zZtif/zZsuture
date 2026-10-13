@@ -419,6 +419,11 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
     // +90 秒签名章节是 OP/ED 起点而非分集起点；ED 是双方精确已知的锚。
     // 期望盘上 ED 位置 = 等分位 + 字幕 ED 起点（等分位无偏；基线 DP 结果
     // 可能已被 OP 签名带偏，不作期望基准）。第 1 集不锚定（见头文件注释）。
+    // 解析页标记数据（决定 43）：按集对齐，未锚定为 -1 / 空串
+    m.edAnchorMarks = QList<Cs>(N, -1);
+    m.epBasis = QStringList();
+    for (int k = 0; k < N; ++k)
+        m.epBasis.append(QString());
     if (N > 1) {
         // 签名章节全集：其后 87~93 秒内另有章节（OP/ED 起点；成对第二项
         // 无跟随者天然不在内）
@@ -448,6 +453,9 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
             if (gap < kMinEpGapCs || gap > kMaxEpGapCs)
                 continue;
             m.offsets[k] = anchored;
+            m.edAnchorMarks[k] = best;   // 解析页 ▽ 标记与悬停依据（决定 43）
+            m.epBasis[k] = QStringLiteral("字幕片尾 %1 ↔ 盘上的章节 %2")
+                               .arg(formatCs(subEd)).arg(formatCs(best));
             diags.push_back(Diagnostic::make(
                 DiagLevel::Info, DiagCode::MplsUnsupported,
                 QStringLiteral("第 %1 集按片尾曲对齐：字幕片尾 %2 ↔ 盘上的章节"

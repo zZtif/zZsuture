@@ -27,6 +27,7 @@
 #include "diagmodel.hpp"
 #include "filelistmodel.hpp"
 #include "session.hpp"
+#include "discaxisview.hpp"
 #include "timelineview.hpp"
 #include "version.hpp"
 
@@ -83,7 +84,52 @@ void MainWindow::buildUi()
     fileTable_->setColumnWidth(FileListModel::ColOffset, 100);
     fileTable_->setColumnWidth(FileListModel::ColSource, 76);
 
-    // 右侧面板（A1 布局壳：主视野只留 原盘解析卡片 + 高级选项 + 导出）
+    // ---- A-r2（决定 42/43）：原盘解析页 = 左上大板块第二页签 ----
+    // 心智模型：工具的主要功能是字幕自定义，盘的数据是"摆出来给你看的
+    // 参考"——纯数轴读数仪 + 悬停依据 + 套用（仅供参考）
+    auto* parsePage = new QWidget;
+    auto* ppv = new QVBoxLayout(parsePage);
+    ppv->setContentsMargins(8, 8, 8, 8);
+    ppv->setSpacing(8);
+    auto* mplsPath = new QLineEdit;
+    mplsPath->setPlaceholderText(tr("拖入 .mpls 或点浏览选择"));
+    auto* browseBtn = new QPushButton(tr("浏览…"));
+    auto* pathRow = new QHBoxLayout;
+    pathRow->addWidget(mplsPath, 1);
+    pathRow->addWidget(browseBtn);
+    ppv->addLayout(pathRow);
+    auto* parseBtn = new QPushButton(tr("读取原盘"));
+    auto* clearMplsBtn = new QPushButton(tr("清除"));
+    auto* mappingToggle = new QPushButton(tr("显示映射"));
+    mappingToggle->setCheckable(true);
+    mappingToggle->setToolTip(
+        tr("把盘上的时间点以淡色线叠加到时间轴（吸附不受影响）"));
+    auto* btnRow = new QHBoxLayout;
+    btnRow->addWidget(parseBtn, 1);
+    btnRow->addWidget(clearMplsBtn);
+    btnRow->addWidget(mappingToggle);
+    ppv->addLayout(btnRow);
+    auto* mplsInfo = new QLabel(tr("未读取。各集开始时间按上一集字幕结束自动推算。"));
+    mplsInfo->setWordWrap(true);
+    ppv->addWidget(mplsInfo);
+    // 纯数轴（决定 43）：细线刻度 + ◆建议分集点(EP标签) + ▽疑似片尾曲起点
+    // + 章节细刻度 + 图例 + 悬停依据——不用色块，与字幕轴视觉彻底区分
+    discAxis_ = new DiscAxisView(session_);
+    ppv->addWidget(discAxis_, 1);
+    auto* applySuggestBtn = new QPushButton(tr("套用参考起点（仅供参考）"));
+    applySuggestBtn->setObjectName(QStringLiteral("applySuggestBtn"));
+    connect(applySuggestBtn, &QPushButton::clicked, this, [this] {
+        // v1.4.2 原则：应用是显式动作（预测只建议、永不自动生效）
+        session_->applyMplsSuggestion();
+    });
+    ppv->addWidget(applySuggestBtn);
+
+    // 左上大板块页签：[文件] [原盘解析]，读取原盘自动跳转（决定 42）
+    fileTabs_ = new QTabWidget;
+    fileTabs_->addTab(fileTable_, tr("文件"));
+    fileTabs_->addTab(parsePage, tr("原盘解析"));
+
+    // ---- 右侧面板（A-r2 瘦身：高级选项 + 移除 + 导出）----
     auto* panel = new QWidget;
     auto* pv = new QVBoxLayout(panel);
     pv->setContentsMargins(8, 8, 8, 8);
@@ -93,60 +139,6 @@ void MainWindow::buildUi()
                                "列表中按住行拖动可排序"));
     hint->setWordWrap(true);
     pv->addWidget(hint);
-
-    // ---- 原盘解析卡片：解析事实 + 参考起点表 + 一键套用 ----
-    auto* mplsBox = new QGroupBox(tr("原盘解析"));
-    auto* mv = new QVBoxLayout(mplsBox);
-    auto* mplsPath = new QLineEdit;
-    mplsPath->setPlaceholderText(tr("拖入 .mpls 或点浏览选择"));
-    auto* browseBtn = new QPushButton(tr("浏览…"));
-    auto* pathRow = new QHBoxLayout;
-    pathRow->addWidget(mplsPath, 1);
-    pathRow->addWidget(browseBtn);
-    mv->addLayout(pathRow);
-    auto* parseBtn = new QPushButton(tr("读取原盘"));
-    auto* clearMplsBtn = new QPushButton(tr("清除"));
-    auto* btnRow = new QHBoxLayout;
-    btnRow->addWidget(parseBtn, 1);
-    btnRow->addWidget(clearMplsBtn);
-    mv->addLayout(btnRow);
-    auto* mplsInfo = new QLabel(tr("未读取。各集开始时间按上一集字幕结束自动推算。"));
-    mplsInfo->setWordWrap(true);
-    mv->addWidget(mplsInfo);
-    // 参考起点表（A1：建议值的正式归宿——不再塞进告警面板）
-    suggestTable_ = new QTableWidget;
-    suggestTable_->setColumnCount(4);
-    suggestTable_->setHorizontalHeaderLabels(
-        {tr("集"), tr("参考起点"), tr("当前起点"), tr("差值")});
-    suggestTable_->verticalHeader()->hide();
-    suggestTable_->setAlternatingRowColors(true);
-    suggestTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    suggestTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    suggestTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    suggestTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    suggestTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    suggestTable_->setColumnWidth(0, 34);
-    suggestTable_->setColumnWidth(3, 52);
-    suggestTable_->setMaximumHeight(160);
-    suggestPlaceholder_ = new QLabel(
-        tr("读取原盘后，这里会列出每集的参考起点\n（来自章节），确认后可一键套用"));
-    suggestPlaceholder_->setWordWrap(true);
-    suggestPlaceholder_->setAlignment(Qt::AlignCenter);
-    mv->addWidget(suggestTable_);
-    mv->addWidget(suggestPlaceholder_);
-    auto* applySuggestBtn = new QPushButton(tr("套用参考起点"));
-    applySuggestBtn->setObjectName(QStringLiteral("applySuggestBtn"));
-    connect(applySuggestBtn, &QPushButton::clicked, this, [this] {
-        // v1.4.2 原则：应用是显式动作（预测只建议、永不自动生效）
-        session_->applyMplsSuggestion();
-    });
-    mv->addWidget(applySuggestBtn);
-    // 表格行点击 → 定位文件列表对应行
-    connect(suggestTable_, &QTableWidget::cellClicked, this, [this](int r, int) {
-        if (r >= 0 && r < fileModel_->rowCount())
-            fileTable_->selectRow(r);
-    });
-    pv->addWidget(mplsBox);
 
     // ---- 高级选项（折叠）：低频功能收纳 ----
     auto* advToggle = new QPushButton(tr("▸ 高级选项"));
@@ -196,9 +188,9 @@ void MainWindow::buildUi()
                                .arg(m->items.size())
                                .arg(formatCs(m->totalCs));
             if (session_->mplsChapterMode()) {
-                // 多集一个 m2ts：参考值在右侧表；"第一集对应第几个正片"
+                // 多集一个 m2ts：参考值在上方数轴；"第一集对应第几个正片"
                 // 是一集一个片段的概念，此模式下无意义
-                text += tr("｜ 参考起点见下表");
+                text += tr("｜ 分集点见上方数轴，悬停可看依据");
                 startSpin->setRange(1, 1);
                 startSpin->setEnabled(false);
             } else {
@@ -212,6 +204,7 @@ void MainWindow::buildUi()
             startSpin->setRange(1, 1);
             startSpin->setEnabled(false);
         }
+        discAxis_->refresh();
     };
     connect(startSpin, &QSpinBox::valueChanged, this, [this](int v) {
         session_->setMplsStartMain(v - 1);   // UI 1 基 → 内部 0 基
@@ -223,7 +216,10 @@ void MainWindow::buildUi()
         if (!p.isEmpty())
             mplsPath->setText(p);
     });
-    connect(parseBtn, &QPushButton::clicked, this, [this, mplsPath, applyMplsInfo] {
+    connect(parseBtn, &QPushButton::clicked, this,
+            [this, mplsPath, applyMplsInfo, parsePage] {
+        // 决定 42：按下解析按钮自动跳到本页
+        fileTabs_->setCurrentWidget(parsePage);
         const QString p = mplsPath->text().trimmed();
         if (p.isEmpty()) {
             QMessageBox::information(this, tr("SUture"),
@@ -233,18 +229,19 @@ void MainWindow::buildUi()
         QString err;
         if (!session_->loadMplsFile(p, &err)) {
             applyMplsInfo();
-            refreshSuggestTable();
             QMessageBox::warning(this, tr("原盘解析失败"),
                                  err.isEmpty() ? tr("无法读取该文件") : err);
             return;
         }
         applyMplsInfo();
-        refreshSuggestTable();
     });
     connect(clearMplsBtn, &QPushButton::clicked, this, [this, applyMplsInfo] {
         session_->clearMpls();
         applyMplsInfo();
-        refreshSuggestTable();
+    });
+    // 决定 44：显示映射开关 → 盘标记叠加到时间轴（吸附不受影响）
+    connect(mappingToggle, &QPushButton::toggled, this, [this](bool on) {
+        timeline_->setDiscOverlay(on);
     });
 
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
@@ -266,7 +263,7 @@ void MainWindow::buildUi()
     pv->addStretch(1);
 
     auto* topSplit = new QSplitter(Qt::Horizontal);
-    topSplit->addWidget(fileTable_);
+    topSplit->addWidget(fileTabs_);
     topSplit->addWidget(panel);
     topSplit->setStretchFactor(0, 1);
     topSplit->setStretchFactor(1, 0);
@@ -304,53 +301,13 @@ void MainWindow::buildUi()
     mainSplit->setSizes({400, 260});
     setCentralWidget(mainSplit);
 
-    // 解析卡片随会话状态刷新（参考表在偏移变化后要重算"当前/差值"列）
-    connect(session_, &Session::structureChanged, this, [this, applyMplsInfo] {
-        applyMplsInfo();
-        refreshSuggestTable();
-    });
-    connect(session_, &Session::paramsChanged, this, [this] {
-        refreshSuggestTable();
-    });
+    // 解析页随会话结构变化刷新（数轴标记与按钮可用性）
+    connect(session_, &Session::structureChanged, this, applyMplsInfo);
 
     statusLabel_ = new QLabel;
     // 常驻右侧：不被 showMessage 的临时消息（导出成功提示等）覆盖
     statusBar()->addPermanentWidget(statusLabel_);
     refreshStatus();
-}
-
-void MainWindow::refreshSuggestTable()
-{
-    // 原盘解析卡片的参考起点表：无建议/无文件时显示引导占位
-    const QList<Cs> sug = session_->mplsSuggestedOffsets();
-    const bool show = !sug.isEmpty() && sug.size() == session_->count();
-    suggestTable_->setVisible(show);
-    suggestPlaceholder_->setVisible(!show);
-    if (!show)
-        return;
-    suggestTable_->setRowCount(session_->count());
-    for (int i = 0; i < session_->count(); ++i) {
-        const Cs cur = session_->entry(i).offset;
-        const Cs diff = sug[i] - cur;
-        const auto set = [this](int r, int c, const QString& t) {
-            auto* it = suggestTable_->item(r, c);
-            if (!it) {
-                it = new QTableWidgetItem(t);
-                it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-                suggestTable_->setItem(r, c, it);
-            } else {
-                it->setText(t);
-            }
-        };
-        set(i, 0, QString::number(i + 1));
-        set(i, 1, formatCs(sug[i]));
-        set(i, 2, formatCs(cur));
-        set(i, 3, diff == 0 ? QStringLiteral("—")
-                            : QStringLiteral("%1%2 秒")
-                                  .arg(diff > 0 ? QLatin1String("+")
-                                                : QLatin1String("-"))
-                                  .arg(qAbs(diff) / 100.0, 0, 'f', 1));
-    }
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* e)
@@ -363,14 +320,15 @@ void MainWindow::dropEvent(QDropEvent* e)
 {
     if (!e->mimeData()->hasUrls())
         return;
-    // .mpls 文件单独分流到 MPLS 面板（阶段 3），其余走字幕装载
+    // .mpls 文件单独分流到解析页（A-r2 决定 42：自动跳转），其余走字幕装载
     QList<QUrl> subtitleUrls;
     for (const QUrl& url : e->mimeData()->urls()) {
         const QString local = url.toLocalFile();
         if (local.endsWith(QStringLiteral(".mpls"), Qt::CaseInsensitive)) {
+            fileTabs_->setCurrentIndex(1);
             QString err;
             if (!session_->loadMplsFile(local, &err))
-                QMessageBox::warning(this, tr("MPLS 解析失败"),
+                QMessageBox::warning(this, tr("原盘解析失败"),
                                      err.isEmpty() ? tr("无法读取该文件") : err);
         } else {
             subtitleUrls.append(url);

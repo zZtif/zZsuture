@@ -223,6 +223,13 @@ void TestMpls::chapterDtB()
     // 末集集界 = 项时长；其余 = 下一集起点
     QCOMPARE(qint64(m.episodeEnds[5]), qint64(870470));
     QCOMPARE(qint64(m.episodeEnds[0]), qint64(144943));
+    // A-r2：ED 锚定标记与依据（解析页纯数轴的 ▽ 标记与悬停文本来源）
+    QCOMPARE(m.edAnchorMarks.size(), 6);
+    QCOMPARE(qint64(m.edAnchorMarks[0]), qint64(-1));      // 第 1 集不锚定
+    QCOMPARE(qint64(m.edAnchorMarks[1]), qint64(277878));  // 46:18.78
+    QCOMPARE(qint64(m.edAnchorMarks[5]), qint64(857657));  // 2:22:56.57
+    QVERIFY(m.epBasis[0].isEmpty());
+    QVERIFY(m.epBasis[1].contains(QStringLiteral("0:46:18.78")));
 }
 
 void TestMpls::chapterShigofumi()
@@ -248,6 +255,10 @@ void TestMpls::chapterShigofumi()
     const qint64 want[] = {0, 141900, 284234, 426550, 568875};
     for (int k = 0; k < 5; ++k)
         QCOMPARE(qint64(m.offsets[k]), want[k]);
+    // A-r2：ED 锚定标记（盘上的 ED 章节实时刻）
+    const qint64 edWant[] = {-1, 274157, 416491, 558817, 701142};
+    for (int k = 0; k < 5; ++k)
+        QCOMPARE(qint64(m.edAnchorMarks[k]), edWant[k]);
 }
 
 void TestMpls::chapterEdAnchorBeatsDp()
