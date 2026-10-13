@@ -83,10 +83,12 @@ private:
     int hitBlock(const QPoint& pos) const;
 
     // ---- 拖动状态 ----
-    enum class Drag { None, Block, Point, Rubber };
+    enum class Drag { None, Block, Point, Rubber, Pan };
     Drag drag_ = Drag::None;
     QPoint pressPos_;
     QPoint lastPos_;               // 读数条光标时刻（setMouseTracking）
+    Cs panGrabTime_ = 0;           // 平移起点：按住时的光标时刻（抓着走）
+    Cs panGrabViewLeft_ = 0;
     QList<int> dragRows_;          // 块拖动影响的行（多选批量）
     Cs dragGrabOff_ = 0;           // 按下点相对块起点的偏移
     Cs dragOrigStart_ = 0;         // 起始块原起点（算 Δ 用）
@@ -130,6 +132,7 @@ private:
     void zoomAt(const QPoint& center, double factor);
     void fitToContent();
     void buildToolbar();
+    void showHelp();               // ❕：全部操作方式速查表（决定 48）
 
     Session* s_;
 };

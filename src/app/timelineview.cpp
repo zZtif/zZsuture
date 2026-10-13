@@ -1,13 +1,17 @@
 #include "timelineview.hpp"
 
 #include <QContextMenuEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -97,16 +101,20 @@ void TimelineView::buildToolbar()
     auto* zoomOut = new QPushButton(QStringLiteral("-"));
     auto* zoomIn = new QPushButton(QStringLiteral("+"));
     auto* fit = new QPushButton(tr("适配"));
+    auto* help = new QPushButton(tr("❕"));
+    help->setToolTip(tr("全部操作方式"));
     connect(zoomOut, &QPushButton::clicked, this,
             [this] { zoomAt(QPoint(width() / 2, 0), 1.0 / 1.25); });
     connect(zoomIn, &QPushButton::clicked, this,
             [this] { zoomAt(QPoint(width() / 2, 0), 1.25); });
     connect(fit, &QPushButton::clicked, this, [this] { fitToContent(); update(); });
+    connect(help, &QPushButton::clicked, this, &TimelineView::showHelp);
     lay->addWidget(magnet);
     lay->addStretch(1);
     lay->addWidget(zoomOut);
     lay->addWidget(zoomIn);
     lay->addWidget(fit);
+    lay->addWidget(help);
     // 工具条浮在顶部（绘制区从其下方开始）
     bar->setGeometry(0, 0, 400, kToolbarH);
     bar->setFixedHeight(kToolbarH);
@@ -521,8 +529,47 @@ void TimelineView::drawReadout(QPainter& p) const
 
 // ---------------------------------------------------------------- 鼠标
 
+void TimelineView::showHelp()
+{
+    // ❕ 速查表（决定 48）：三组操作一览，含"不可撤销"警示
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("操作方式"));
+    auto* lay = new QVBoxLayout(&dlg);
+    auto* text = new QLabel(
+        tr("<b>时间轴</b><br>"
+           "拖动集块 = 移动该集（后面的集跟着平移）<br>"
+           "块下方或标尺按住左键拖动 / 中键拖动 = 平移视口<br>"
+           "滚轮 = 缩放（以光标为中心）｜ Ctrl+滚轮 = 平移<br>"
+           "←→ = 移动选中块（±0.1 秒，Shift ±1 秒）；无选中时 = 平移<br>"
+           "选中块后直接敲数字 = 移动到指定时刻（如 0:23:46）<br>"
+           "Ctrl+Z = 撤销 ｜ F = 适配窗口<br>"
+           "Delete = 移除选中的整集（<b>不可撤销</b>）<br><br>"
+           "<b>文件</b><br>"
+           "拖入文件/文件夹 = 添加 ｜ 列表中按住行拖动 = 排序<br>"
+           "双击\"本集开始于\" = 直接输入数值（支持 0:24:09.45 / 24:09 / 秒数）<br><br>"
+           "<b>原盘解析页</b><br>"
+           "读取原盘 = 查看盘上的时间点（悬停看依据）<br>"
+           "套用参考起点 = 仅供参考的一键填充，套用后可任意改"));
+    text->setWordWrap(true);
+    text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    lay->addWidget(text);
+    lay->addWidget(buttons);
+    dlg.exec();
+}
+
 void TimelineView::mousePressEvent(QMouseEvent* e)
 {
+    // 中键任意处 = 平移（决定 41 三通道之一）
+    if (e->button() == Qt::MiddleButton) {
+        pressPos_ = e->pos();
+        drag_ = Drag::Pan;
+        panGrabTime_ = xToTime(e->pos().x());
+        panGrabViewLeft_ = viewLeft_;
+        dragMoved_ = false;
+        return;
+    }
     if (e->button() != Qt::LeftButton) {
         QWidget::mousePressEvent(e);
         return;
@@ -563,7 +610,17 @@ void TimelineView::mousePressEvent(QMouseEvent* e)
         return;
     }
 
-    // 空白：框选（Ctrl 不清除已有选择）
+    // 块下方区域 / 标尺带 = 左键平移（决定 41：主平移通道；
+    // 该区域没有块与点，点命中已在前面处理）
+    if ((e->pos().y() >= trackBottom() && e->pos().y() < readoutTop())
+        || (e->pos().y() >= rulerTop() && e->pos().y() < rulerBottom())) {
+        drag_ = Drag::Pan;
+        panGrabTime_ = xToTime(e->pos().x());
+        panGrabViewLeft_ = viewLeft_;
+        return;
+    }
+
+    // 轨道带内空白：框选（Ctrl 不清除已有选择）
     if (!(e->modifiers() & Qt::ControlModifier))
         selection_.clear();
     drag_ = Drag::Rubber;
@@ -575,9 +632,21 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
 {
     lastPos_ = e->pos();
     if (drag_ == Drag::None) {
-        setCursor(hitPoint(e->pos()) >= 0 || hitBlock(e->pos()) >= 0
-                      ? Qt::SizeAllCursor : Qt::ArrowCursor);
+        const bool overPanZone =
+            (e->pos().y() >= trackBottom() && e->pos().y() < readoutTop())
+            || (e->pos().y() >= rulerTop() && e->pos().y() < rulerBottom());
+        setCursor(overPanZone ? Qt::SizeHorCursor
+                              : (hitPoint(e->pos()) >= 0 || hitBlock(e->pos()) >= 0
+                                     ? Qt::SizeAllCursor : Qt::ArrowCursor));
         update();   // 读数条光标时刻
+        return;
+    }
+
+    if (drag_ == Drag::Pan) {
+        // 抓着数轴走：按住点时刻跟随光标（决定 41）
+        userAdjustedView_ = true;
+        viewLeft_ = panGrabViewLeft_ + (panGrabTime_ - xToTime(e->pos().x()));
+        update();
         return;
     }
 
@@ -639,7 +708,8 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
 
 void TimelineView::mouseReleaseEvent(QMouseEvent* e)
 {
-    if (e->button() != Qt::LeftButton)
+    // 左键与中键都结束拖动（中键平移的释放也必须复位，否则卡在平移态）
+    if (e->button() != Qt::LeftButton && e->button() != Qt::MiddleButton)
         return;
     if (drag_ == Drag::Block && dragMoved_)
         commitBlockDrag();
@@ -696,8 +766,19 @@ void TimelineView::keyPressEvent(QKeyEvent* e)
     switch (e->key()) {
     case Qt::Key_Left:
     case Qt::Key_Right: {
+        const bool left = e->key() == Qt::Key_Left;
+        // 决定 41 两用语义：无选中（块与点都无）= 平移视口（长按连续），
+        // 有选中 = ±0.1 秒移动选中块（Shift ±1 秒）
+        if (selection_.isEmpty() && selPointRow_ < 0) {
+            userAdjustedView_ = true;
+            const Cs step = Cs(40.0 / pxPerCs_)   // 一次约 40px，自动重复即连续滚动
+                            * ((e->modifiers() & Qt::ShiftModifier) ? 4 : 1);
+            viewLeft_ += left ? -step : step;
+            update();
+            return;
+        }
         const Cs step = (e->modifiers() & Qt::ShiftModifier) ? Cs(100) : Cs(10);
-        nudgeSelection(e->key() == Qt::Key_Left ? -step : step);
+        nudgeSelection(left ? -step : step);
         return;
     }
     case Qt::Key_Delete:
