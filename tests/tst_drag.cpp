@@ -46,6 +46,7 @@ private slots:
     void timelineMoveTo();           // F08：内联"移动到"（实测校准形态）
     void timelinePan();              // A-r2：块下方拖动平移 + ←→ 两用语义
     void reimportAfterMpls();        // 验收反馈 4：加载过 MPLS 后删光重导，偏移应为预填链
+    void resetToInitial();           // 恢复最初状态：打乱后一键归位 + 可撤销
 };
 
 namespace {
@@ -606,6 +607,33 @@ void TestDrag::timelinePan()
     QApplication::sendEvent(&view, &mv2);
     QTest::mouseRelease(&view, Qt::MiddleButton, Qt::NoModifier, QPoint(500, y));
     QCOMPARE(fx.session.entry(0).offset, Cs(0));
+}
+
+void TestDrag::resetToInitial()
+{
+    Fixture fx;   // 4 集，预填链 0 / 23:00 / 46:00 / 69:00
+    // 打乱：涟漪改第 2 集 + 全局微调 + 分段点
+    fx.session.setOffsetRipple(1, Cs(30 * 6000));
+    fx.session.setGlobalShift(Cs(500));
+    QList<SegmentPoint> pts;
+    pts.append({fx.session.entry(0).sub->id, 0, 350});
+    fx.session.setSegmentPoints(pts);
+    QVERIFY(fx.session.entry(1).offset != Cs(23 * 6000));
+    QVERIFY(fx.session.globalShift() != 0);
+
+    // 一键归位：偏移回预填链、依据回自动推算、全局与分段点清零
+    fx.session.resetToInitial();
+    QCOMPARE(fx.session.entry(0).offset, Cs(0));
+    QCOMPARE(fx.session.entry(1).offset, Cs(23 * 6000));
+    QCOMPARE(fx.session.entry(3).offset, Cs(3 * 23 * 6000));
+    QCOMPARE(fx.session.entry(0).source, EpisodeInput::OffsetSource::Prefill);
+    QCOMPARE(fx.session.globalShift(), Cs(0));
+    QCOMPARE(fx.session.segmentPoints().size(), 0);
+
+    // 误按可撤销：Ctrl+Z 回到打乱状态
+    fx.session.undo();
+    QVERIFY(fx.session.entry(1).offset != Cs(23 * 6000));
+    QCOMPARE(fx.session.globalShift(), Cs(500));
 }
 
 QTEST_MAIN(TestDrag)

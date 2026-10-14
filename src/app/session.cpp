@@ -214,6 +214,25 @@ void Session::setOffsetRipple(int row, Cs offset, bool fromTimeline)
     emit resultChanged();
 }
 
+void Session::resetToInitial()
+{
+    // 恢复最初状态：等价于"刚导入时的预填排布"。全部行依据回 Prefill
+    // （预填链由 recomputePrefill 重算）、套用过的集界出点清空、全局微调
+    // 与分段点归零。压快照——误按可 Ctrl+Z
+    pushUndo();
+    for (Entry& e : entries_) {
+        e.source = EpisodeInput::OffsetSource::Prefill;
+        e.mplsEnd.reset();
+    }
+    options_.segmentPoints.clear();
+    options_.globalShift = 0;
+    options_.boundaryGapThreshold = 2 * 100;
+    recomputePrefill();
+    remerge();
+    emit paramsChanged();
+    emit resultChanged();
+}
+
 void Session::setGlobalShift(Cs shift)
 {
     pushUndo();

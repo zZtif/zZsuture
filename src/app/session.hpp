@@ -71,6 +71,10 @@ public:
     // A-r2（决定 45）：涟漪式设定——第 row 行设为 offset，其后所有行同 Δ
     // 平移（显式联动：修好一个集间交界，后面的集顺势就位）；一次 = 一步撤销
     void setOffsetRipple(int row, Cs offset, bool fromTimeline = false);
+    // 恢复最初状态（验收反馈后续）：整理打乱后一键回到"刚导入"的排布——
+    // 全部偏移回预填链、依据回自动推算、全局微调/分段点清零。
+    // 一步可撤销（按错了 Ctrl+Z 就回来）
+    void resetToInitial();
     void setGlobalShift(Cs shift);
     Cs globalShift() const { return options_.globalShift; }   // 时间轴画最终时刻用
 
