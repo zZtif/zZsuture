@@ -11,6 +11,8 @@
 
 #include "session.hpp"
 
+class QPushButton;
+
 namespace suture {
 
 class DiscAxisView : public QWidget {
@@ -18,27 +20,30 @@ class DiscAxisView : public QWidget {
 public:
     explicit DiscAxisView(Session* session, QWidget* parent = nullptr);
 
-    // 会话变化后重取数据（章节/建议点/ED 锚定点/总时长）
+    // 会话变化后重取数据（章节/建议点/总时长）
     void refresh();
 
 protected:
     void paintEvent(QPaintEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
 
 private:
-    // 悬停命中：返回 (kind, index)；kind: 0=章节 1=建议点 2=ED 锚定
-    // 命中优先级：建议点 > ED 锚定 > 章节（重要的标记先命中）
+    // 悬停命中：返回 (kind, index)；kind: 0=章节 1=建议点
+    // 默认模式只命中建议点；全部节点模式只命中章节（互斥显示）
     int hitMarker(int x) const;   // 返回 kind*100000+idx，-1 无
     int timeToX(Cs t) const;
     Cs xToTime(int x) const;
 
     Session* s_;
     QList<Cs> chapters_;      // 全部章节（排序去重）
-    QList<Cs> suggests_;      // 建议分集点（每集）
-    QList<Cs> eds_;           // ED 锚定章节（-1 无，按集对齐）
+    QList<Cs> suggests_;      // 建议开始时间（每集）
+    QList<Cs> eds_;           // ED 锚定章节（悬停依据用，不再单独绘制）
     QStringList basis_;       // 每集锚定依据（配合 suggests_ 悬停）
     Cs total_ = 0;            // 盘总时长（正片段长合计）
     int margin_ = 16;         // 左右留白（px）
+    bool showAllNodes_ = false;          // 全部节点模式（验收反馈 5）
+    QPushButton* allNodesBtn_ = nullptr; // 右上角开关按钮
 };
 
 }  // namespace suture

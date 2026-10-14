@@ -45,6 +45,7 @@ private slots:
     void timelineDragBlock();        // F08：拖块改偏移（独立式）+ 撤销
     void timelineMoveTo();           // F08：内联"移动到"（实测校准形态）
     void timelinePan();              // A-r2：块下方拖动平移 + ←→ 两用语义
+    void reimportAfterMpls();        // 验收反馈 4：加载过 MPLS 后删光重导，偏移应为预填链
 };
 
 namespace {
@@ -520,9 +521,40 @@ void TestDrag::timelineMoveTo()
     edit->clear();
     QTest::keyClicks(edit, QStringLiteral("0:10:00.00"));
     QTest::keyClick(edit, Qt::Key_Return);
-    // 块起点（最终坐标）= 0:10:00 → 偏移 = 60000（全局微调 0）
-    QCOMPARE(fx.session.entry(0).offset, Cs(60000));
+    // 验收反馈 2：输入时刻 = 首句应到的位置 → 偏移 = 60000 − 首句偏移(100)
+    QCOMPARE(fx.session.entry(0).offset, Cs(60000 - 100));
     QCOMPARE(fx.session.entry(0).source, EpisodeInput::OffsetSource::Timeline);
+}
+
+void TestDrag::reimportAfterMpls()
+{
+    // 验收反馈 4 回归：加载过 MPLS 后删光全部字幕再重新导入——
+    // analyzeMpls 不改偏移，曾致新行没人算预填、全部偏移停在 0 堆成一整块
+    QTemporaryDir dir;
+    Session session;
+    // 先加载 MPLS（合成：1 个正片项 + 章节，建议可用）
+    const quint32 origin = ticks(600 * 100);
+    const QByteArray raw = buildMpls(
+        {{origin, origin + ticks(3 * 24 * 6000), 0, "00001"}},
+        {{1, 0, origin}, {1, 0, origin + ticks(24 * 6000)},
+         {1, 0, origin + ticks(24 * 6000 + 9009)}});
+    const QString mplsPath = dir.filePath(QStringLiteral("00000.mpls"));
+    QFile mf(mplsPath);
+    QVERIFY(mf.open(QIODevice::WriteOnly));
+    mf.write(raw);
+    mf.close();
+    QString err;
+    QVERIFY(session.loadMplsFile(mplsPath, &err));
+
+    // 导入 → 删光 → 重新导入：偏移应为预填链（0 / 23:00 / 46:00），
+    // 而不是全部 0
+    loadFakeSubs(session, dir, 2);
+    session.removeRows({0, 1});
+    QCOMPARE(session.count(), 0);
+    loadFakeSubs(session, dir, 2);
+    QCOMPARE(session.count(), 2);
+    QCOMPARE(session.entry(0).offset, Cs(0));
+    QCOMPARE(session.entry(1).offset, Cs(23 * 6000));
 }
 
 void TestDrag::timelinePan()
