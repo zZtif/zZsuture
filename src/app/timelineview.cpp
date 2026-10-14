@@ -149,6 +149,7 @@ void TimelineView::refresh()
         const Session::Entry& e = s_->entry(i);
         RowInfo r;
         r.row = i;
+        r.epNumber = e.sub->epConfident ? e.sub->epNumber : -1;
         r.fileId = e.sub->id;
         r.start = e.offset + gs;
         // 内容范围（fileTime 域）：最早的非 Comment 非零时长行 = 首句；
@@ -453,7 +454,10 @@ void TimelineView::drawTrack(QPainter& p) const
             p.setPen(QColor(0xff, 0xff, 0xff, 220));
             p.drawText(QRect(x1 + 6, trackTop(), x2 - x1 - 8, kTrackH),
                        Qt::AlignVCenter | Qt::AlignLeft,
-                       tr("第%1集").arg(r + 1));
+                       tr("第%1集")
+                           .arg(r < rows_.size() && rows_[r].epNumber >= 0
+                                    ? rows_[r].epNumber
+                                    : r + 1));
         }
     }
 
@@ -487,15 +491,19 @@ void TimelineView::drawReadout(QPainter& p) const
         left = tr("时间轴");
     } else if (drag_ == Drag::Block && previewStart_ >= 0) {
         const Cs delta = previewStart_ - dragOrigStart_;
+        const int dr = dragRows_.isEmpty() ? 0 : dragRows_.first();
         left = tr("第%1集：%2（Δ%3秒）")
-                   .arg(dragRows_.isEmpty() ? 1 : dragRows_.first() + 1)
+                   .arg(dr < rows_.size() && rows_[dr].epNumber >= 0
+                            ? rows_[dr].epNumber : dr + 1)
                    .arg(formatCs(previewStart_))
                    .arg(double(delta) / 100.0, 0, 'f', 1);
     } else if (!selection_.isEmpty()) {
+        const int sr = selection_.first();
         left = tr("选中 %1 集：第%2集 开始于 %3")
                    .arg(selection_.size())
-                   .arg(selection_.first() + 1)
-                   .arg(formatCs(rowFinalStart(selection_.first())));
+                   .arg(sr < rows_.size() && rows_[sr].epNumber >= 0
+                            ? rows_[sr].epNumber : sr + 1)
+                   .arg(formatCs(rowFinalStart(sr)));
     } else {
         left = tr("单击选块，拖动移动（后面的集跟着平移）；滚轮缩放");
     }
@@ -621,7 +629,8 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
                 setToolTip(tr("第%1集\n"
                               "首句 %2 起「%3」\n"
                               "末句 %4 止「%5」")
-                               .arg(hr + 1)
+                               .arg(rows_[hr].epNumber >= 0
+                                        ? rows_[hr].epNumber : hr + 1)
                                .arg(formatCs(base + ri.contentFirst),
                                     ri.firstText,
                                     formatCs(base + ri.maxEnd + ri.totalWarp),

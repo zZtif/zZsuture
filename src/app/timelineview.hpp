@@ -42,6 +42,9 @@ private:
     // ---- 布局数据（refresh 重算；时间坐标 = 合并时间轴最终时刻，厘秒）----
     struct RowInfo {
         int row = 0;
+        int epNumber = -1;    // 实际集数（文件名/内容识别；-1 = 未识别，
+                             // 显示回退用行序号——验收反馈：拖入 6-10 集
+                             // 时块上不能还写"第1集第2集"）
         quint64 fileId = 0;
         Cs start = 0;         // 块起点（offset + globalShift，最终坐标）
         Cs contentFirst = 0;  // 该集最早内容（fileTime 域）

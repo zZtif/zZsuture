@@ -47,6 +47,7 @@ private slots:
     void timelinePan();              // A-r2：块下方拖动平移 + ←→ 两用语义
     void reimportAfterMpls();        // 验收反馈 4：加载过 MPLS 后删光重导，偏移应为预填链
     void resetToInitial();           // 恢复最初状态：打乱后一键归位 + 可撤销
+    void episodeNumberSync();        // 验收反馈：拖入 6-10 集，块标签显示实际集数
 };
 
 namespace {
@@ -634,6 +635,33 @@ void TestDrag::resetToInitial()
     fx.session.undo();
     QVERIFY(fx.session.entry(1).offset != Cs(23 * 6000));
     QCOMPARE(fx.session.globalShift(), Cs(500));
+}
+
+void TestDrag::episodeNumberSync()
+{
+    // 拖入第 6~10 集（文件名 [06]..[10]）：块的集数标签必须显示实际集数，
+    // 不能还写"第1集第2集"（时间轴标签取 RowInfo::epNumber，识别失败
+    // 才回退行序号——此处验证数据源正确接线）
+    QTemporaryDir dir;
+    Session session;
+    QList<QUrl> urls;
+    for (int n = 6; n <= 10; ++n) {
+        const QString p = dir.filePath(
+            QStringLiteral("[%1].ass").arg(n, 2, 10, QChar(u'0')));
+        QFile f(p);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(kAss);
+        f.close();
+        urls << QUrl::fromLocalFile(p);
+    }
+    session.addUrls(urls);
+    QCOMPARE(session.count(), 5);
+    // 数据源：每行 epConfident 且 epNumber = 6..10（refresh 时进 RowInfo，
+    // 块标签/读数条/悬停全部经 epNumber >= 0 分支取实际集数）
+    for (int i = 0; i < 5; ++i) {
+        QVERIFY(session.entry(i).sub->epConfident);
+        QCOMPARE(session.entry(i).sub->epNumber, i + 6);
+    }
 }
 
 QTEST_MAIN(TestDrag)
