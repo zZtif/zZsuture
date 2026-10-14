@@ -112,7 +112,7 @@ void TimelineView::buildToolbar()
             [this](bool on) { snapEnabled_ = on; });
     auto* zoomOut = new QPushButton(QStringLiteral("-"));
     auto* zoomIn = new QPushButton(QStringLiteral("+"));
-    auto* fit = new QPushButton(tr("适配"));
+    auto* fit = new QPushButton(tr("复位视野"));
     auto* help = new QPushButton(tr("❕"));
     help->setToolTip(tr("全部操作方式"));
     connect(zoomOut, &QPushButton::clicked, this,
@@ -282,8 +282,8 @@ Cs TimelineView::snapCandidate(Cs t, int excludeRow) const
     for (int r = 0; r < rows_.size(); ++r) {
         if (r == excludeRow)
             continue;
-        edges.append(rowFinalStart(r));
-        edges.append(rowFinalEnd(r));
+        // 吸附目标 = 其它块的首句位置（与被拖块的吸附点对称，验收反馈 3）
+        edges.append(rowFinalStart(r) + rows_[r].contentFirst);
     }
     hit = nearest(edges);
     if (hit >= 0)
@@ -343,37 +343,20 @@ void TimelineView::drawRuler(QPainter& p) const
         p.setPen(QPen(QColor(0x3a, 0x3d, 0x47), 1));
         p.drawLine(timeToX(t), rulerBottom() - 4, timeToX(t), rulerBottom());
     }
-    // 盘标记叠加（决定 44）：默认不画——章节一直是吸附目标但不必常显
-    // （"蓝点那么多"的反馈）；解析页"显示映射"开关开启才叠加：
-    // 建议分集点 = 强调色线 + EP 标签；ED 锚定 = 黄色小三角；章节 = 极淡线
+    // 盘标记叠加（决定 44 + 验收反馈 5 简化）：默认不画；"显示映射"开启后
+    // 只映射推荐开始时间为蓝色菱形（不映射章节/片尾曲——减少视觉噪音）。
+    // 章节刻度始终是吸附目标，与显示无关
     if (discOverlay_) {
-        for (Cs t : chapterTicks_) {
-            const int x = timeToX(t);
-            if (x < -10 || x > width() + 10)
-                continue;
-            p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 25), 1));
-            p.drawLine(x, rulerBottom(), x, readoutTop());
-        }
-        for (Cs t : discEds_) {
-            if (t < 0)
-                continue;
-            const int x = timeToX(t);
+        for (int k = 0; k < discSuggests_.size(); ++k) {
+            const int x = timeToX(discSuggests_[k]);
             if (x < -10 || x > width() + 10)
                 continue;
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(0xe8, 0xc2, 0x68));
-            QPolygon tri;
-            tri << QPoint(x - 4, rulerBottom() - 9) << QPoint(x + 4, rulerBottom() - 9)
-                << QPoint(x, rulerBottom() - 2);
-            p.drawPolygon(tri);
-        }
-        p.setFont(QFont(p.font().family(), 8));
-        for (int k = 0; k < discSuggests_.size(); ++k) {
-            const int x = timeToX(discSuggests_[k]);
-            if (x < -30 || x > width() + 30)
-                continue;
-            p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 110), 1));
-            p.drawLine(x, rulerBottom(), x, readoutTop());
+            p.setBrush(QColor(0x4f, 0x8c, 0xff));
+            QPolygon dia;
+            dia << QPoint(x, rulerBottom() - 11) << QPoint(x + 5, rulerBottom() - 6)
+                << QPoint(x, rulerBottom() - 1) << QPoint(x - 5, rulerBottom() - 6);
+            p.drawPolygon(dia);
             p.setPen(QColor(0x9d, 0xbe, 0xff));
             p.drawText(QRect(x - 24, rulerBottom() + 2, 48, 12), Qt::AlignHCenter,
                        QStringLiteral("EP%1").arg(k + 1));
@@ -539,8 +522,8 @@ void TimelineView::showHelp()
            "块下方或标尺按住左键拖动 / 中键拖动 = 平移视口<br>"
            "滚轮 = 缩放（以光标为中心）｜ Ctrl+滚轮 = 平移<br>"
            "←→ = 移动选中块（±0.1 秒，Shift ±1 秒）；无选中时 = 平移<br>"
-           "选中块后直接敲数字 = 移动到指定时刻（如 0:23:46）<br>"
-           "Ctrl+Z = 撤销 ｜ F = 适配窗口<br>"
+           "选中块后直接敲数字 = 首句移动到指定时刻（如 0:23:46）<br>"
+           "Ctrl+Z = 撤销 ｜ F = 复位视野<br>"
            "Delete = 移除选中的整集（<b>不可撤销</b>）<br><br>"
            "<b>文件</b><br>"
            "拖入文件/文件夹 = 添加 ｜ 列表中按住行拖动 = 排序<br>"
@@ -662,15 +645,19 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
         if (raw < 0)
             raw = 0;   // x=0 硬墙
         Cs target = raw;
+        // 吸附在首句标记处（验收反馈 3）：字幕开头不在块左端，块左缘吸附
+        // 实际无用——白三角（首句）对齐目标才有意义。吸附目标也改为其它
+        // 块的首句位置（snapCandidate 内部处理）
+        const int dr = dragRows_.isEmpty() ? -1 : dragRows_.first();
+        const Cs firstOff = dr >= 0 ? rows_[dr].contentFirst : Cs(0);
         if (snapEnabled_ && !(e->modifiers() & Qt::AltModifier)) {
-            const Cs hit = snapCandidate(raw, dragRows_.isEmpty() ? -1
-                                                                  : dragRows_.first());
+            const Cs hit = snapCandidate(raw + firstOff, dr);
             if (hit >= 0)
-                target = hit;
+                target = hit - firstOff;
         }
         if (target < 0)
             target = 0;
-        snapTarget_ = (target != raw) ? target : Cs(-1);
+        snapTarget_ = (target != raw) ? target + firstOff : Cs(-1);
         previewStart_ = target;
         if (target != dragOrigStart_)
             dragMoved_ = true;
@@ -880,13 +867,16 @@ void TimelineView::ensureMoveEditor()
     if (moveEdit_)
         return;
     moveEdit_ = new QLineEdit(this);
-    moveEdit_->setPlaceholderText(tr("0:23:46.00 回车确认，Esc 取消"));
+    moveEdit_->setPlaceholderText(tr("首句移动到 0:23:46.00"));
     moveEdit_->hide();
     connect(moveEdit_, &QLineEdit::returnPressed, this, [this] {
         const auto cs = parseTimeToCs(moveEdit_->text());
         if (cs.has_value() && moveRow_ >= 0 && moveRow_ < rows_.size()) {
+            // 验收反馈 2：输入时刻 = 首句应到的位置（实测校准语义），
+            // 块起点 = 输入 − 首句在文件内的偏移
             const Cs gs = s_->globalShift();
-            s_->setOffsetRipple(moveRow_, std::max(Cs(0), *cs - gs), true);
+            const Cs off = *cs - gs - rows_[moveRow_].contentFirst;
+            s_->setOffsetRipple(moveRow_, std::max(Cs(0), off), true);
         }
         moveEdit_->hide();
     });
@@ -910,12 +900,12 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e)
 {
     QMenu menu(this);
     if (const int r = hitBlock(e->pos()); r >= 0) {
-        menu.addAction(tr("移动到…"), this, [this, r] {
+        menu.addAction(tr("首句移动到…"), this, [this, r] {
             selection_ = {r};
             openMoveEditor(r, QString());
         });
     } else {
-        menu.addAction(tr("适配窗口"), this, [this] { fitToContent(); update(); });
+        menu.addAction(tr("复位视野"), this, [this] { fitToContent(); update(); });
     }
     menu.exec(e->globalPos());
 }

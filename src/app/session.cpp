@@ -50,11 +50,11 @@ void Session::addUrls(const QList<QUrl>& urls)
                          return naturalLessThan(QFileInfo(a.sub->path).fileName(),
                                                 QFileInfo(b.sub->path).fileName());
                      });
-    // 偏移来源优先级：MPLS 生效则重新映射（集数可能变了），否则预填
+    // 预填无条件重算（analyzeMpls v1.4.2 起不改偏移——曾致“加载过 MPLS
+    // 后删光再导入，全部偏移停在 0 堆成一整块”的 bug：新行没人算预填）
+    recomputePrefill();
     if (mpls_)
         analyzeMpls();
-    else
-        recomputePrefill();
     checkEpisodeOrder();
     undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
@@ -70,10 +70,9 @@ void Session::removeRows(const QList<int>& rows)
         if (r >= 0 && r < count())
             entries_.erase(entries_.begin() + r);
     }
+    recomputePrefill();   // 无条件：analyzeMpls 不改偏移，新行需预填（堆块 bug）
     if (mpls_)
         analyzeMpls();
-    else
-        recomputePrefill();
     checkEpisodeOrder();
     undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
@@ -96,10 +95,9 @@ void Session::moveRows(int srcRow, int count_, int destRow)
     const int insertAt = (destRow > srcRow) ? destRow - count_ : destRow;
     for (int i = 0; i < count_; ++i)
         entries_.insert(entries_.begin() + insertAt + i, std::move(moved[size_t(i)]));
+    recomputePrefill();   // 无条件：analyzeMpls 不改偏移，新行需预填（堆块 bug）
     if (mpls_)
         analyzeMpls();
-    else
-        recomputePrefill();
     checkEpisodeOrder();
     undoStack_.clear();   // 结构变化不进撤销（决定 32）
     remerge();
