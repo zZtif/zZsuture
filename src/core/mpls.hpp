@@ -77,30 +77,22 @@ MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
 struct ChapterMapping {
     bool ok = false;
     QString clip;               // 多集 m2ts 的 clip 名（F07 同名导出用）
-    QList<Cs> offsets;          // 每集建议起点（m2ts 文件内相对位置，第 1 集通常 0）
-    QList<Cs> episodeEnds;      // 建议集界 = 下一集起点（末集 = 项时长），C1 用
-    // A-r2（决定 43）：解析页纯数轴的标记数据——每集实际用于锚定的盘章节
-    // （▽ 疑似片尾曲起点）与锚定依据（悬停详情）；未锚定的集为 -1 / 空串
-    QList<Cs> edAnchorMarks;
-    QStringList epBasis;
+    QList<Cs> offsets;         // 每集分界点（m2ts 文件内相对位置，第 1 集恒为 0）
+    QList<Cs> episodeEnds;      // 建议集界 = 下一集分界点（末集 = 项时长），C1 用
+    QStringList epBasis;       // 每集依据文本（解析页悬停："链式预估 X → 吸附
+                               // 章节 Y" / "无章节佐证请人工核对"）
 };
 
-// 算法（黑契 36 章/死后文 29 章双盘数据标定 + 死后文实测 bug 修正）：
-//   基线（无字幕信息时）：候选 = 该项章节的文件内相对时刻（剔除"成对章节"
-//   第二个——前一章节恰在 87~93 秒前的是 OP/ED 结束点），目标位 = 项时长
-//   等分，评分 = |候选−目标| − 签名奖励，集间距约束的单调 DP。
-//   ★ ED 锚定（subEdStarts 提供 ED 起点的集，优先级高于基线）：
-//   +90 秒签名章节实证是 OP/ED 的**起点**而非分集起点——死后文每集结构
-//   [预告][首语][OP 90.09s][A/B][ED 90.09s]，首语在 OP 前且不带签名，纯签名
-//   启发会把整集吸到 OP 起点（实测偏晚 27.6 秒）。ED 是双方都精确已知的
-//   点：盘上 = 带 90 秒跟随者的章节；字幕 = ed 样式行最早时刻。锚定式：
-//     偏移 = 最近的签名章节(等分位 + 字幕ED起点) − 字幕ED起点
-//   第 1 集不锚定（字幕零点≈文件起点，基线已可靠；且老字幕组 ED 行常晚于
-//   歌曲起点数秒，锚定反引入偏差——死后文 ep1 实测 -6.5 秒）。
-// 吸附距离超容差的集回落等分值并告警——一切建议以人工核对为准（T8 冻结
-// 方案：自动只做建议，不做定案）。
+// 链式分界点（所有者设计并实测验证，整改文档 一.2）：
+//   ① 第 1 集分界点 = 文件头（多集 m2ts 第一集在 0:00，三盘实证）
+//   ② 第 k+1 集预估 = 第 k 集分界点 + 第 k 集字幕最晚结束（结束最晚的
+//      一行有效台词，不区分样式——ED 歌词/下集预告/对话谁最晚取谁）
+//   ③ 就近吸附章节节点（±60 秒内），吸不到保持预估值 + 告警人工核对
+// 旧机制（等分位/90 秒签名加分/DP/ED 锚定）已全部废除——从盘单侧猜分集
+// 点的路线被 DISC2 实测证伪。14/14 分界点三盘验证 + 所有者端到端实测
+// （按建议合成字幕，对轴无偏差）。
 ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
-                                    const QList<Cs>& subEdStarts,   // 每集字幕 ED 起点，-1 = 无
+                                    const QList<Cs>& subLastEnds,  // 每集字幕最晚结束
                                     std::vector<Diagnostic>& diags);
 
 }  // namespace suture

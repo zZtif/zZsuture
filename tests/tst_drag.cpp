@@ -353,26 +353,25 @@ void TestDrag::missingEpisodeWarning()
 
 void TestDrag::chapterPrefillDivergence()
 {
-    // 死后文实测 bug 的安全网：章节建议与字幕连续预填大幅背离 → 按集告警。
-    // 构造：ep1 字幕被截短（10:00 结束 → 预填 ep2 = 10:00），盘内 ED 章节把
-    // ep2 锚定到 24:00 → 背离 14 分钟，必须告警（连续切割字幕的预填误差
-    // 实测仅 0.05/2.3 秒，大幅背离 = 建议可疑）。
+    // 建议与字幕连续预填大幅背离 → 按集告警（连续切割字幕的预填误差
+    // 实测仅 0.05/2.3 秒，大幅背离 = 吸附值可疑）。
+    // 构造：ep1 最晚结束 9:40 → 预填 ep2 = 9:40；盘上最近章节 10:00
+    // （Δ20 秒，60 秒容差内 → 吸附）；建议 10:00 vs 预填 9:40 相差 20 秒
+    // （>15 秒阈值）→ 告警。
     QTemporaryDir dir;
     Session session;
-    // ep1 字幕：单行 10:00 结束（截短）；ep2 字幕：带 ed_ch 行于 20:00
     const char* kAssEp1 =
         "[Script Info]\nScriptType: v4.00+\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Actor, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
-        "Dialogue: 0,0:00:01.00,0:10:00.00,Default,,0,0,0,,x\n";
+        "Dialogue: 0,0:00:01.00,0:09:40.00,Default,,0,0,0,,x\n";
     const char* kAssEp2 =
         "[Script Info]\nScriptType: v4.00+\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Actor, MarginL, MarginR, "
         "MarginV, Effect, Text\n"
-        "Dialogue: 0,0:00:01.00,0:23:00.00,Default,,0,0,0,,x\n"
-        "Dialogue: 0,0:20:00.00,0:20:05.00,ed_ch,,0,0,0,,ED\n";
+        "Dialogue: 0,0:00:01.00,0:23:00.00,Default,,0,0,0,,x\n";
     int n = 1;
     for (const char* tpl : {kAssEp1, kAssEp2}) {
         const QString p = dir.filePath(
@@ -383,11 +382,11 @@ void TestDrag::chapterPrefillDivergence()
         f.close();
         session.addUrls({QUrl::fromLocalFile(p)});
     }
-    // 盘：2 集 × 24 分钟；ED 对 44:00→45:30.09；ep2 起点 24:00（无标记）
+    // 盘：2 集 × 24 分钟；章节在 0 / 10:00（链式预估 9:40 → 吸附 10:00）
     const quint32 origin = ticks(600 * 100);
     const QByteArray raw = buildMpls(
         {{origin, origin + ticks(2 * 24 * 6000), 0, "00001"}},
-        {{1, 0, origin + ticks(264000)}, {1, 0, origin + ticks(273009)}});
+        {{1, 0, origin}, {1, 0, origin + ticks(60000)}});
     const QString mplsPath = dir.filePath(QStringLiteral("00000.mpls"));
     QFile mf(mplsPath);
     QVERIFY(mf.open(QIODevice::WriteOnly));
@@ -397,7 +396,7 @@ void TestDrag::chapterPrefillDivergence()
     QVERIFY(session.loadMplsFile(mplsPath, &err));
     QVERIFY(session.mplsChapterMode());
     QVERIFY(session.applyMplsSuggestion());             // v1.4.2：显式应用
-    QCOMPARE(session.entry(1).offset, Cs(24 * 6000));   // ED 锚定结果
+    QCOMPARE(session.entry(1).offset, Cs(60000));     // 链式吸附 10:00
     bool hasDiverge = false;
     for (const Diagnostic& d : session.allDiags())
         if (d.level == DiagLevel::Warning && d.code == DiagCode::MplsUnsupported

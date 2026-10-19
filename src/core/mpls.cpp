@@ -250,30 +250,26 @@ MplsMapping mapItemsToEpisodes(const MplsInfo& info, int episodeCount,
 
 }  // namespace suture
 
-// ---- 章节分集建议（T8/T10）的实现细节（匿名命名空间常量在文件头部）----
+// ---- 链式分界点（所有者设计并实测验证，整改文档 一.2）----
+// 旧机制（等分位 / 90 秒签名加分 / DP / ED 锚定）已全部删除：四者皆从
+// 盘单侧猜分集点，DISC2 实测翻车（OP 起点章节抢走第 1 集位置，偏 69 秒）。
 namespace suture {
-namespace {
-
-// OP/ED 时长签名窗口与奖励、吸附容差、集间距约束（黑契/死后文双盘标定）
-constexpr Cs kSigLoCs   = 87 * 100;
-constexpr Cs kSigHiCs   = 93 * 100;
-constexpr Cs kSigBonusCs = 90 * 100;
-constexpr Cs kSnapTolCs  = 150 * 100;
-constexpr Cs kMinEpGapCs = 10 * 6000;
-constexpr Cs kMaxEpGapCs = 60 * 6000;
-constexpr Cs kInfCost    = Cs(1) << 60;
-
-}  // namespace
 
 ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
-                                    const QList<Cs>& subEdStarts,
-                                    std::vector<Diagnostic>& diags)
+                                   const QList<Cs>& subLastEnds,
+                                   std::vector<Diagnostic>& diags)
 {
+    // 链式分界点：字幕自身的时间链是主估计，章节只做就近确认
+    //   ① 第 1 集分界点 = 文件头（多集 m2ts 第一集在 0:00，三盘实证）
+    //   ② 第 k+1 集预估 = 第 k 集分界点 + 第 k 集字幕最晚结束
+    //      （最晚结束 = 结束最晚的一行有效台词，不区分样式——ED 歌词、
+    //        下集预告、对话谁最晚取谁；排除 Comment 与零时长行）
+    //   ③ 就近吸附章节节点（±60 秒内），吸不到保持预估值 + 告警
     ChapterMapping m;
     if (episodeCount <= 0)
         return m;
 
-    // 前提：恰一个正片项（多集一个 m2ts 型；多正片项 → 调用方走 PlayItem 映射）
+    // 前提：恰一个正片 PlayItem（多集装在一个 m2ts；多正片项走 PlayItem 映射）
     int mainIdx = -1, mainCount = 0;
     for (int i = 0; i < info.items.size(); ++i) {
         if (info.items[i].durationCs >= kMainItemMinCs) {
@@ -284,9 +280,8 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
     if (mainCount != 1)
         return m;
     const PlayItemSpan& item = info.items[mainIdx];
-    const Cs dur = item.durationCs;
 
-    // 该项 Entry Mark → 文件内相对时刻（去重排序）
+    // 章节表：该正片项的 Entry Mark 相对时刻（排序去重）
     QList<Cs> rels;
     for (const PlayListMark& mk : info.marks) {
         if (mk.itemIndex != mainIdx || mk.type != 1 || mk.time45k < item.in45k)
@@ -295,179 +290,51 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
         if (!rels.contains(rel))
             rels.append(rel);
     }
-    if (rels.isEmpty())
-        return m;
     std::sort(rels.begin(), rels.end());
 
-    // 候选：剔除"成对章节"的第二个（前一个恰在 87~93 秒前 = OP/ED 结束点，
-    // 双盘实证从不为分集点）。签名在全体章节上找（含被剔除的）。
-    QList<Cs> cand;
-    QList<bool> sig;
-    for (int i = 0; i < rels.size(); ++i) {
-        if (i > 0 && rels[i] - rels[i - 1] >= kSigLoCs && rels[i] - rels[i - 1] <= kSigHiCs)
-            continue;
-        cand.append(rels[i]);
-        bool s = false;
-        for (const Cs r : rels) {
-            if (r >= cand.last() + kSigLoCs && r <= cand.last() + kSigHiCs) {
-                s = true;
-                break;
-            }
-        }
-        sig.append(s);
-    }
-
-    const int N = episodeCount, M = int(cand.size());
+    const int N = episodeCount;
+    m.ok = true;
     m.clip = item.clip;
-
-    // 单调 DP：dp[k][i] = 以候选 i 作第 k 集起点的最小总代价
-    const auto target = [dur, N](int k) -> Cs {
-        return (Cs(k) * dur + N / 2) / N;
-    };
-    const auto rawDist = [&cand, &target, N, M](int k, int i) -> Cs {
-        Q_UNUSED(M)
-        return qAbs(cand[i] - target(k));
-    };
-
-    bool feasible = M >= N;
-    QVector<QVector<Cs>> dp;
-    QVector<QVector<int>> parent;
-    if (feasible) {
-        dp.assign(N, QVector<Cs>(M, kInfCost));
-        parent.assign(N, QVector<int>(M, -1));
-        for (int i = 0; i < M; ++i)
-            dp[0][i] = rawDist(0, i) - (sig[i] ? kSigBonusCs : Cs(0));
-        for (int k = 1; k < N; ++k) {
-            for (int i = 0; i < M; ++i) {
-                for (int j = 0; j < i; ++j) {
-                    const Cs gap = cand[i] - cand[j];
-                    if (gap < kMinEpGapCs || gap > kMaxEpGapCs || dp[k - 1][j] >= kInfCost)
-                        continue;
-                    const Cs c = dp[k - 1][j] + rawDist(k, i)
-                               - (sig[i] ? kSigBonusCs : Cs(0));
-                    if (c < dp[k][i]) {
-                        dp[k][i] = c;
-                        parent[k][i] = j;
-                    }
-                }
-            }
-        }
-        feasible = false;
-        for (int i = 0; i < M; ++i)
-            if (dp[N - 1][i] < kInfCost)
-                feasible = true;
-    }
-
-    if (!feasible) {
-        // 章节构不成合法序列：等分预填 + 告警，人工核对（宁可明白地不准）
-        m.ok = true;
-        for (int k = 0; k < N; ++k)
-            m.offsets.append(target(k));
-        diags.push_back(Diagnostic::make(
-            DiagLevel::Warning, DiagCode::MplsUnsupported,
-            QStringLiteral("章节无法构成合理的分集顺序（%1 个候选 / %2 集），"
-                           "已按均匀估计填入，请逐集核对").arg(M).arg(N)));
-    } else {
-        // 回溯最优序列
-        int best = 0;
-        for (int i = 1; i < M; ++i)
-            if (dp[N - 1][i] < dp[N - 1][best])
-                best = i;
-        QVector<int> pick(N, -1);
-        for (int k = N - 1; k >= 0; --k) {
-            pick[k] = best;
-            best = parent[k][best];
-        }
-        m.ok = true;
-        for (int k = 0; k < N; ++k) {
-            const int i = pick[k];
-            if (rawDist(k, i) > kSnapTolCs) {
-                // 吸附失败：回落等分值 + 告警（fileIndex=k → 告警面板点击定位该行）
-                m.offsets.append(target(k));
-                diags.push_back(Diagnostic::make(
-                    DiagLevel::Warning, DiagCode::MplsUnsupported,
-                    QStringLiteral("第 %1 集开始位置附近 %2 内没有章节，已按均匀"
-                                   "估计 %3 填入——请人工核对（最近的候选 %4）")
-                        .arg(k + 1).arg(formatCs(kSnapTolCs)).arg(formatCs(target(k)))
-                        .arg(formatCs(cand[i])), k));
-            } else {
-                m.offsets.append(cand[i]);
-                const Cs delta = cand[i] - target(k);
-                if (k > 0 && qAbs(delta) > 30 * 100)
-                    diags.push_back(Diagnostic::make(
-                        DiagLevel::Info, DiagCode::MplsUnsupported,
-                        QStringLiteral("第 %1 集起点对齐到章节 %2（均匀估计 %3，"
-                                       "差 %4 秒）——请核对")
-                            .arg(k + 1).arg(formatCs(cand[i])).arg(formatCs(target(k)))
-                            .arg(delta / 100), k));
-            }
-        }
-        // T10 一致性：签名候选数 + 1 与集数不符 → 提示逐集核对
-        int sigCount = 0;
-        for (bool s : sig)
-            if (s)
-                ++sigCount;
-        if (sigCount + 1 != N)
-            diags.push_back(Diagnostic::make(
-                DiagLevel::Info, DiagCode::MplsUnsupported,
-                QStringLiteral("识别出 %1 个疑似分集点，与字幕集数（%2）不一定"
-                               "一致——请逐集核对")
-                    .arg(sigCount).arg(N)));
-    }
-
-    // ---- ED 锚定（T8 修正，死后文实测 bug）----
-    // +90 秒签名章节是 OP/ED 起点而非分集起点；ED 是双方精确已知的锚。
-    // 期望盘上 ED 位置 = 等分位 + 字幕 ED 起点（等分位无偏；基线 DP 结果
-    // 可能已被 OP 签名带偏，不作期望基准）。第 1 集不锚定（见头文件注释）。
-    // 解析页标记数据（决定 43）：按集对齐，未锚定为 -1 / 空串
-    m.edAnchorMarks = QList<Cs>(N, -1);
     m.epBasis = QStringList();
     for (int k = 0; k < N; ++k)
         m.epBasis.append(QString());
-    if (N > 1) {
-        // 签名章节全集：其后 87~93 秒内另有章节（OP/ED 起点；成对第二项
-        // 无跟随者天然不在内）
-        QList<Cs> sigMarks;
-        for (Cs r : rels) {
-            for (Cs d : rels) {
-                if (d >= r + kSigLoCs && d <= r + kSigHiCs) {
-                    sigMarks.append(r);
-                    break;
-                }
-            }
-        }
-        for (int k = 1; k < N && k < int(subEdStarts.size()); ++k) {
-            const Cs subEd = subEdStarts[k];
-            if (subEd < 0)
-                continue;
-            const Cs expected = target(k) + subEd;
-            Cs best = -1;
-            for (Cs mk : sigMarks)
-                if (best < 0 || qAbs(mk - expected) < qAbs(best - expected))
-                    best = mk;
-            if (best < 0 || qAbs(best - expected) > kSnapTolCs)
-                continue;   // 附近无签名章节：保留基线结果
-            const Cs anchored = best - subEd;
-            // 单调性护栏：与上一集起点间距须在 10~60 分钟
-            const Cs gap = anchored - m.offsets[k - 1];
-            if (gap < kMinEpGapCs || gap > kMaxEpGapCs)
-                continue;
-            m.offsets[k] = anchored;
-            m.edAnchorMarks[k] = best;   // 解析页 ▽ 标记与悬停依据（决定 43）
-            m.epBasis[k] = QStringLiteral("字幕片尾 %1 ↔ 盘上的章节 %2")
-                               .arg(formatCs(subEd)).arg(formatCs(best));
+
+    // ① 第 1 集 = 文件头
+    m.offsets.append(0);
+    m.epBasis[0] = QStringLiteral("多集文件的第 1 集在文件头（三盘实证）");
+
+    // ②③ 链式累加 + 就近吸附
+    constexpr Cs kAttachTolCs = 60 * 100;   // 60 秒：超时不吸，告警人工核对
+    for (int k = 1; k < N; ++k) {
+        const Cs lastEnd = (k - 1) < subLastEnds.size() ? subLastEnds[k - 1] : Cs(0);
+        const Cs predicted = m.offsets[k - 1] + lastEnd;
+        Cs best = -1;
+        for (Cs r : rels)
+            if (best < 0 || qAbs(r - predicted) < qAbs(best - predicted))
+                best = r;
+        if (!rels.isEmpty() && best >= 0 && qAbs(best - predicted) <= kAttachTolCs) {
+            m.offsets.append(best);
+            m.epBasis[k] = QStringLiteral("链式预估 %1 → 吸附章节 %2")
+                               .arg(formatCs(predicted))
+                               .arg(formatCs(best));
+        } else {
+            m.offsets.append(predicted);
+            m.epBasis[k] = QStringLiteral("链式预估 %1（60 秒内无章节佐证，"
+                                           "请人工核对）")
+                               .arg(formatCs(predicted));
             diags.push_back(Diagnostic::make(
-                DiagLevel::Info, DiagCode::MplsUnsupported,
-                QStringLiteral("第 %1 集按片尾曲对齐：字幕片尾 %2 ↔ 盘上的章节"
-                               " %3（差 %4 秒）")
-                    .arg(k + 1).arg(formatCs(subEd)).arg(formatCs(best))
-                    .arg((anchored - target(k)) / 100), k));
+                DiagLevel::Warning, DiagCode::MplsUnsupported,
+                QStringLiteral("第 %1 集链式预估 %2 附近 60 秒内没有章节——"
+                               "保持预估值，请人工核对（该集字幕可能不含 "
+                               "ED 歌词/预告，或与盘不同源）")
+                    .arg(k + 1).arg(formatCs(predicted)), k));
         }
     }
 
-    // 集界 = 下一集起点（末集 = 项时长），供 C1 交叉验证
+    // 集界 = 下一集分界点（末集 = 项时长），供 C1 交叉验证
+    m.episodeEnds.reserve(N);
     for (int k = 0; k < N; ++k)
-        m.episodeEnds.append(k + 1 < N ? m.offsets[k + 1] : dur);
+        m.episodeEnds.append(k + 1 < N ? m.offsets[k + 1] : item.durationCs);
     return m;
 }
 
