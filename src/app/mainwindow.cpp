@@ -91,7 +91,8 @@ void MainWindow::buildUi()
     auto* ppv = new QVBoxLayout(parsePage);
     ppv->setContentsMargins(8, 8, 8, 8);
     ppv->setSpacing(8);
-    auto* mplsPath = new QLineEdit;
+    mplsPathEdit_ = new QLineEdit;
+    auto* mplsPath = mplsPathEdit_;
     mplsPath->setPlaceholderText(tr("拖入 .mpls 或点浏览选择"));
     auto* browseBtn = new QPushButton(tr("浏览…"));
     auto* pathRow = new QHBoxLayout;
@@ -184,9 +185,22 @@ void MainWindow::buildUi()
     const auto applyMplsInfo = [this, mplsInfo, startSpin, applySuggestBtn] {
         applySuggestBtn->setEnabled(session_->mplsSuggestionAvailable());
         if (const MplsInfo* m = session_->mpls()) {
-            QString text = tr("已解析：%1 个正片片段，总时长 %2")
-                               .arg(m->items.size())
+            // 验收反馈 3：直接给出"播哪个 m2ts、多长、约几集"——用户按
+            // 时长自行判断哪个列表是主内容（不自动选，预测只建议）
+            QString clips;
+            for (const PlayItemSpan& it : m->items) {
+                if (!clips.isEmpty())
+                    clips += QStringLiteral("、");
+                clips += it.clip + QStringLiteral(".m2ts");
+            }
+            const int estEps =
+                int((m->totalCs + 12 * 6000) / (24 * 6000));   // 24 分钟/集
+            QString text = tr("播放 %1 ｜ 总时长 %2")
+                               .arg(clips)
                                .arg(formatCs(m->totalCs));
+            text += estEps > 0
+                ? tr(" ｜ 约 %1 集（按 24 分钟/集估算，仅供参考）").arg(estEps)
+                : tr("（不足一集——可能是警告/菜单列表，请换下一个）");
             if (session_->mplsChapterMode()) {
                 // 多集一个 m2ts：参考值在上方数轴；"第一集对应第几个正片"
                 // 是一集一个片段的概念，此模式下无意义
@@ -326,6 +340,7 @@ void MainWindow::dropEvent(QDropEvent* e)
         const QString local = url.toLocalFile();
         if (local.endsWith(QStringLiteral(".mpls"), Qt::CaseInsensitive)) {
             fileTabs_->setCurrentIndex(1);
+            mplsPathEdit_->setText(local);   // 拖入路径同步显示（验收反馈）
             QString err;
             if (!session_->loadMplsFile(local, &err))
                 QMessageBox::warning(this, tr("原盘解析失败"),

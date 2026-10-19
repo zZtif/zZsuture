@@ -303,16 +303,19 @@ ChapterMapping suggestChapterStarts(const MplsInfo& info, int episodeCount,
     m.offsets.append(0);
     m.epBasis[0] = QStringLiteral("多集文件的第 1 集在文件头（三盘实证）");
 
-    // ②③ 链式累加 + 就近吸附
+    // ②③ 链式累加 + 向后就近吸附（所有者指正：分界节点必然在最后一句
+    // 台词之后——向后搜索（预估位之前）只会吸到本集内部章节（如 ED 起点），
+    // 属歧义残留。只认 predicted ≤ 节点 ≤ predicted+60s）
     constexpr Cs kAttachTolCs = 60 * 100;   // 60 秒：超时不吸，告警人工核对
     for (int k = 1; k < N; ++k) {
         const Cs lastEnd = (k - 1) < subLastEnds.size() ? subLastEnds[k - 1] : Cs(0);
         const Cs predicted = m.offsets[k - 1] + lastEnd;
         Cs best = -1;
         for (Cs r : rels)
-            if (best < 0 || qAbs(r - predicted) < qAbs(best - predicted))
+            if (r >= predicted
+                && (best < 0 || r - predicted < best - predicted))
                 best = r;
-        if (!rels.isEmpty() && best >= 0 && qAbs(best - predicted) <= kAttachTolCs) {
+        if (!rels.isEmpty() && best >= 0 && best - predicted <= kAttachTolCs) {
             m.offsets.append(best);
             m.epBasis[k] = QStringLiteral("链式预估 %1 → 吸附章节 %2")
                                .arg(formatCs(predicted))

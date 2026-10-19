@@ -5,6 +5,7 @@
 
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
 class QTabWidget;
 class QTableView;
 
@@ -38,6 +39,7 @@ private:
     QTableView*   diagTable_ = nullptr;
     TimelineView* timeline_ = nullptr;       // A2：时间轴主视图
     QTabWidget*   fileTabs_ = nullptr;       // A-r2：[文件] [原盘解析] 页签
+    QLineEdit*    mplsPathEdit_ = nullptr;  // 解析页路径栏（拖入时同步显示）
     class DiscAxisView* discAxis_ = nullptr; // A-r2：解析页纯数轴
     QLabel*       statusLabel_ = nullptr;
 };
