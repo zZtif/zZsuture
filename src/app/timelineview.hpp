@@ -1,11 +1,11 @@
 // timelineview.hpp —— F08 时间轴主视图（v2.0 核心交互，需求 §4/F08）
 // 自定义控件（不用 QGraphicsView/QML，理由见需求 §7）：交互纯一维，所有
 // 编辑经 Session 单一事实源（拖块 = setOffsets(fromTimeline)，依据标"时间轴"）。
-// 语义要点（决定 24~33）：
-//   · 独立式拖动——拖一个集块其它集不动，批量靠多选；
-//   · 分段点集内语义——只影响所在集的点后内容；
-//   · 吸附三重保险：章节刻度 > 其它块边缘 >（深放大）整秒，±0.3 秒，
-//     吸附必显示指示线，Alt 临时关、磁铁开关全局关；
+// 语义要点：
+//   · 涟漪式拖动——拖第 N 集块其后所有集同 Δ 平移（决定 45），Alt 单块；
+//   · 吸附已删除（验收反馈 2.5：实测没用）——拖动即裸平移；
+//   · 台词时间常显：右键"显示台词时间"（悬停不稳定已删，反馈 2.2），
+//     时刻实时同步块位置（反馈 2.3）；
 //   · x=0 硬墙（ASS 时间非负）；重叠允许、红色斜纹标示；
 //   · 拖动中本地预览，松手才提交 Session（合并重算是整次操作，不逐像素）；
 //   · Ctrl+Z = Session 参数快照撤销。
@@ -65,9 +65,8 @@ private:
                                         // 保留供 totalWarp 计算，恒为空）
     QList<Cs> chapterTicks_;
     // A-r2（决定 44）：盘标记叠加层——默认不显示（"蓝点太多"反馈），
-    // 解析页"显示映射"开关控制；吸附不受开关影响（章节一直是吸附目标）
-    QList<Cs> discSuggests_;   // 建议分集点（叠加时带 EP 标签）
-    QList<Cs> discEds_;        // ED 锚定章节（叠加时黄色小三角）
+    // 解析页"显示映射"开关控制
+    QList<Cs> discSuggests_;   // 建议分集点（叠加时蓝色菱形 + EP 标签）
     bool discOverlay_ = false;
 
 public:
@@ -110,12 +109,7 @@ public:
     Cs previewStart_ = -1;         // 块拖动预览：主块新起点（-1 无预览）
     QRect rubber_;                 // 框选矩形（widget 坐标）
     QList<int> selection_;         // 选中的行
-    int hoverRow_ = -1;            // 悬停中的块（tooltip 内容变化时才重设）
-
-    // ---- 吸附 ----
-    bool snapEnabled_ = true;      // 磁铁开关（工具条）
-    Cs snapTarget_ = -1;           // 拖动中的吸附目标（-1 无）
-    Cs snapCandidate(Cs t, int excludeRow) const;
+    int scriptRow_ = -1;           // 右键"显示台词时间"常显的行（-1 无）
 
     // ---- 内联"移动到"（选中块后敲数字 / 双击块）----
     QLineEdit* moveEdit_ = nullptr;

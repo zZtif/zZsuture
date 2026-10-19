@@ -244,13 +244,6 @@ void MainWindow::buildUi()
         timeline_->setDiscOverlay(on);
     });
 
-    auto* resetBtn = new QPushButton(tr("恢复最初状态"));
-    resetBtn->setToolTip(tr("整理打乱后一键回到刚导入时的排布（可 Ctrl+Z 撤销）"));
-    connect(resetBtn, &QPushButton::clicked, this, [this] {
-        session_->resetToInitial();
-    });
-    pv->addWidget(resetBtn);
-
     auto* removeBtn = new QPushButton(tr("移除所选文件"));
     connect(removeBtn, &QPushButton::clicked, this, [this] {
         QList<int> rows;
