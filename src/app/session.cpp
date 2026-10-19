@@ -288,11 +288,12 @@ void Session::analyzeMpls()
         return;
     std::vector<Diagnostic> diags;
 
-    // 优先：章节建议（T8，v1.4 场景）——恰一个正片 PlayItem（多集一个 m2ts）
-    QList<Cs> subEd;   // 每集字幕 ED 起点（T8 修正：ED 锚定）
+    // 优先：链式分界点建议（整改文档 一.2）——恰一个正片 PlayItem
+    // （多集一个 m2ts）。字幕最晚结束是链式主估计（结束最晚的有效台词）
+    QList<Cs> subLastEnds;
     for (const Entry& e : entries_)
-        subEd.append(detectEdStartCs(*e.doc));
-    const ChapterMapping ch = suggestChapterStarts(*mpls_, count(), subEd, diags);
+        subLastEnds.append(e.doc->maxDialogueEnd);
+    const ChapterMapping ch = suggestChapterStarts(*mpls_, count(), subLastEnds, diags);
     if (ch.ok) {
         chapterMode_ = true;
         mplsMainCount_ = 1;
@@ -300,7 +301,7 @@ void Session::analyzeMpls()
         chapterSuggestion_ = ch;
         mplsDiags_.push_back(Diagnostic::make(
             DiagLevel::Info, DiagCode::MplsUnsupported,
-            QStringLiteral("该 m2ts 含多集（%1）：已算出每集参考起点——自动"
+            QStringLiteral("该 m2ts 含多集（%1）：已算出每集分界点——自动"
                            "推算未改动，确认后点\"套用参考起点\"；导出文件名"
                            "建议与视频同名（%1.ass）").arg(ch.clip)));
         for (const Diagnostic& d : diags)
@@ -380,11 +381,6 @@ QList<Cs> Session::chapterTicks() const
     }
     std::sort(out.begin(), out.end());
     return out;
-}
-
-QList<Cs> Session::edAnchorTicks() const
-{
-    return chapterSuggestion_ ? chapterSuggestion_->edAnchorMarks : QList<Cs>{};
 }
 
 QStringList Session::mplsEpBasis() const

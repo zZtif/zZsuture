@@ -27,13 +27,6 @@ EpGuess guessEpisodeNumber(const QString& fileName);
 // 逐行取值会被带偏。无标记 / 并列最高 → 不识别（回退自然排序，不硬猜）。
 EpGuess guessEpisodeFromContent(const AssDocument& doc);
 
-// T8 修正（死后文实测 bug）：字幕内片尾曲（ED）起始时刻——章节分集的
-// 稳定锚点。实证：黑契字幕 ED 22:09.35 + 所有者目测验证的偏移 24:09.45
-// = 盘章节 46:18.78（0.02s 吻合）；死后文同构。识别：非 Comment 非零时长
-// Dialogue 中样式名含独立 ed/ending 词（ed_chi / ED_jap / ed_jpn…）的
-// 最早 Start。无 → -1。
-Cs detectEdStartCs(const AssDocument& doc);
-
 // 自然排序比较（识别失败时的兜底；数字段按数值比较："2" < "10"）
 bool naturalLessThan(const QString& a, const QString& b);
 
