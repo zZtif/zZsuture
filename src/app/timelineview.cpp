@@ -33,7 +33,6 @@ QColor rowColor(int i)
     return pal[i % 8];
 }
 
-constexpr Cs kSnapTolCs = 30;                   // 吸附容差 0.3 秒（决定 28）
 constexpr double kMinPxPerCs = 1.0 / 20000.0;   // 全览：2 小时占 ~360px
 constexpr double kMaxPxPerCs = 2.0;             // 深放大：1px = 0.005s
 
@@ -105,11 +104,10 @@ void TimelineView::buildToolbar()
     auto* bar = new QWidget(this);
     auto* lay = new QHBoxLayout(bar);
     lay->setContentsMargins(8, 4, 8, 4);
-    auto* magnet = new QPushButton(tr("吸附"));
-    magnet->setCheckable(true);
-    magnet->setChecked(snapEnabled_);
-    connect(magnet, &QPushButton::toggled, this,
-            [this](bool on) { snapEnabled_ = on; });
+    // 验收反馈 2.1：恢复最初状态在工具条（它本来就是时间轴操作）
+    auto* reset = new QPushButton(tr("恢复最初状态"));
+    reset->setToolTip(tr("整理打乱后一键回到刚导入时的排布（可 Ctrl+Z 撤销）"));
+    connect(reset, &QPushButton::clicked, this, [this] { s_->resetToInitial(); });
     auto* zoomOut = new QPushButton(QStringLiteral("-"));
     auto* zoomIn = new QPushButton(QStringLiteral("+"));
     auto* fit = new QPushButton(tr("复位视野"));
@@ -121,7 +119,7 @@ void TimelineView::buildToolbar()
             [this] { zoomAt(QPoint(width() / 2, 0), 1.25); });
     connect(fit, &QPushButton::clicked, this, [this] { fitToContent(); update(); });
     connect(help, &QPushButton::clicked, this, &TimelineView::showHelp);
-    lay->addWidget(magnet);
+    lay->addWidget(reset);
     lay->addStretch(1);
     lay->addWidget(zoomOut);
     lay->addWidget(zoomIn);
@@ -141,7 +139,6 @@ void TimelineView::refresh()
     points_.clear();
     chapterTicks_ = s_->chapterTicks();
     discSuggests_ = s_->mplsSuggestedOffsets();
-    discEds_ = s_->edAnchorTicks();
     const Cs gs = s_->globalShift();
 
     const QList<SegmentPoint> allPts = s_->segmentPoints();
@@ -263,39 +260,7 @@ int TimelineView::hitBlock(const QPoint& pos) const
     return -1;
 }
 
-// ---------------------------------------------------------------- 吸附
-
-Cs TimelineView::snapCandidate(Cs t, int excludeRow) const
-{
-    // 优先级（决定 28）：章节刻度 > 其它块边缘 >（深放大）整秒刻度
-    const auto nearest = [&t](const QList<Cs>& cands) -> Cs {
-        Cs best = -1;
-        for (Cs c : cands)
-            if (c >= 0 && std::abs(c - t) <= kSnapTolCs
-                && (best < 0 || std::abs(c - t) < std::abs(best - t)))
-                best = c;
-        return best;
-    };
-    Cs hit = nearest(chapterTicks_);
-    if (hit >= 0)
-        return hit;
-    QList<Cs> edges;
-    for (int r = 0; r < rows_.size(); ++r) {
-        if (r == excludeRow)
-            continue;
-        // 吸附目标 = 其它块的首句位置（与被拖块的吸附点对称，验收反馈 3）
-        edges.append(rowFinalStart(r) + rows_[r].contentFirst);
-    }
-    hit = nearest(edges);
-    if (hit >= 0)
-        return hit;
-    if (pxPerCs_ >= 0.3) {   // 深放大（1 秒 ≥ 30px）才吸整秒
-        const Cs whole = (t / 100) * 100;
-        if (std::abs(whole - t) <= kSnapTolCs)
-            return whole;
-    }
-    return -1;
-}
+// 吸附已按验收反馈 2.5 删除（实测没用）——拖动即裸平移
 
 // ---------------------------------------------------------------- 绘制
 
@@ -345,8 +310,7 @@ void TimelineView::drawRuler(QPainter& p) const
         p.drawLine(timeToX(t), rulerBottom() - 4, timeToX(t), rulerBottom());
     }
     // 盘标记叠加（决定 44 + 验收反馈 5 简化）：默认不画；"显示映射"开启后
-    // 只映射推荐开始时间为蓝色菱形（不映射章节/片尾曲——减少视觉噪音）。
-    // 章节刻度始终是吸附目标，与显示无关
+    // 只映射推荐开始时间为蓝色菱形（不映射章节/片尾曲——减少视觉噪音）
     if (discOverlay_) {
         for (int k = 0; k < discSuggests_.size(); ++k) {
             const int x = timeToX(discSuggests_[k]);
@@ -461,20 +425,34 @@ void TimelineView::drawTrack(QPainter& p) const
         }
     }
 
-    // 吸附指示（决定 28：看得见的吸附才不是误操作）
-    if (drag_ != Drag::None && snapTarget_ >= 0) {
-        const int x = timeToX(snapTarget_);
-        p.setPen(QPen(QColor(0xff, 0xd1, 0x64), 2));
-        p.drawLine(x, rulerBottom(), x, readoutTop());
-        p.drawText(QRect(x + 4, trackTop(), 200, 14), Qt::AlignLeft,
-                   tr("吸附 %1").arg(formatCs(snapTarget_)));
-    }
-
     // 框选矩形
     if (drag_ == Drag::Rubber) {
         p.setPen(QPen(QColor(0x4f, 0x8c, 0xff, 180), 1, Qt::DashLine));
         p.setBrush(QColor(0x4f, 0x8c, 0xff, 25));
         p.drawRect(rubber_.normalized());
+    }
+
+    // 常显台词信息条（验收反馈 2/3）：右键块"显示台词时间"切换；时刻从
+    // 当前块位置实时换算（rowFinalStart 预览感知——拖动/键盘/涟漪/撤销
+    // 全路径同步，反馈 3 的要求由绘制时取值天然满足）
+    if (scriptRow_ >= 0 && scriptRow_ < rows_.size()) {
+        const RowInfo& ri = rows_[scriptRow_];
+        const Cs base = rowFinalStart(scriptRow_);
+        const int y0 = pointsY() + 12;
+        p.setPen(QPen(QColor(0x33, 0x36, 0x3f), 1));
+        p.setBrush(QColor(0x22, 0x24, 0x2b));
+        p.drawRect(8, y0, width() - 16, 34);
+        p.setPen(QColor(0xdd, 0xe0, 0xe8));
+        p.drawText(QRect(18, y0 + 2, width() - 36, 15),
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   tr("第%1集  首句 %2 起「%3」")
+                       .arg(ri.epNumber >= 0 ? ri.epNumber : scriptRow_ + 1)
+                       .arg(formatCs(base + ri.contentFirst), ri.firstText));
+        p.drawText(QRect(18, y0 + 18, width() - 36, 15),
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   tr("末句 %1 止「%2」")
+                       .arg(formatCs(base + ri.maxEnd + ri.totalWarp),
+                            ri.lastText));
     }
     p.restore();
 }
@@ -566,7 +544,6 @@ void TimelineView::mousePressEvent(QMouseEvent* e)
     pressPos_ = e->pos();
     dragMoved_ = false;
     previewStart_ = -1;
-    snapTarget_ = -1;
 
     if (const int r = hitBlock(e->pos()); r >= 0) {
         if (e->modifiers() & Qt::ControlModifier) {
@@ -615,28 +592,8 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
         setCursor(overPanZone ? Qt::SizeHorCursor
                               : (hitBlock(e->pos()) >= 0 ? Qt::SizeAllCursor
                                                          : Qt::ArrowCursor));
-        // 悬停块 → 首/末句台词（决定 47；通用悬停管道，内容以后随便扩展）。
-        // 时刻用最终坐标——那就是"现在导出的话播放器会显示的时间"，
-        // 与播放器读数直接可比；调轴闭环：听到台词时刻 ↔ 悬停看现在的位置
-        const int hr = hitBlock(e->pos());
-        if (hr != hoverRow_) {
-            hoverRow_ = hr;
-            if (hr < 0) {
-                setToolTip(QString());
-            } else {
-                const RowInfo& ri = rows_[hr];
-                const Cs base = rowFinalStart(hr);
-                setToolTip(tr("第%1集\n"
-                              "首句 %2 起「%3」\n"
-                              "末句 %4 止「%5」")
-                               .arg(rows_[hr].epNumber >= 0
-                                        ? rows_[hr].epNumber : hr + 1)
-                               .arg(formatCs(base + ri.contentFirst),
-                                    ri.firstText,
-                                    formatCs(base + ri.maxEnd + ri.totalWarp),
-                                    ri.lastText));
-            }
-        }
+        // 悬停显示已按验收反馈 2 删除（经常不显示）——台词时间改为
+        // 右键"显示台词时间"常显（见 contextMenuEvent / drawTrack）
         update();   // 读数条光标时刻
         return;
     }
@@ -650,23 +607,9 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e)
     }
 
     if (drag_ == Drag::Block) {
-        Cs raw = xToTime(e->pos().x()) - dragGrabOff_;
-        if (raw < 0)
-            raw = 0;   // x=0 硬墙
-        Cs target = raw;
-        // 吸附在首句标记处（验收反馈 3）：字幕开头不在块左端，块左缘吸附
-        // 实际无用——白三角（首句）对齐目标才有意义。吸附目标也改为其它
-        // 块的首句位置（snapCandidate 内部处理）
-        const int dr = dragRows_.isEmpty() ? -1 : dragRows_.first();
-        const Cs firstOff = dr >= 0 ? rows_[dr].contentFirst : Cs(0);
-        if (snapEnabled_ && !(e->modifiers() & Qt::AltModifier)) {
-            const Cs hit = snapCandidate(raw + firstOff, dr);
-            if (hit >= 0)
-                target = hit - firstOff;
-        }
+        Cs target = xToTime(e->pos().x()) - dragGrabOff_;
         if (target < 0)
-            target = 0;
-        snapTarget_ = (target != raw) ? target + firstOff : Cs(-1);
+            target = 0;   // x=0 硬墙；其余裸平移（吸附已删，反馈 2.5）
         previewStart_ = target;
         if (target != dragOrigStart_)
             dragMoved_ = true;
@@ -700,7 +643,6 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* e)
     drag_ = Drag::None;
     dragRows_.clear();
     previewStart_ = -1;
-    snapTarget_ = -1;
     rubber_ = QRect();
     update();
 }
@@ -865,7 +807,6 @@ void TimelineView::cancelDrag()
     }
     drag_ = Drag::None;
     previewStart_ = -1;
-    snapTarget_ = -1;
     update();
 }
 
@@ -913,6 +854,13 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e)
             selection_ = {r};
             openMoveEditor(r, QString());
         });
+        // 验收反馈 2：台词时间常显（悬停不稳定已删），右键切换
+        auto* act = menu.addAction(tr("显示台词时间"), this, [this, r] {
+            scriptRow_ = (scriptRow_ == r) ? -1 : r;
+            update();
+        });
+        act->setCheckable(true);
+        act->setChecked(scriptRow_ == r);
     } else {
         menu.addAction(tr("复位视野"), this, [this] { fitToContent(); update(); });
     }
