@@ -1,0 +1,4 @@
+// suture.rc —— Windows 资源：exe 文件图标（资源管理器/任务栏显示用）
+// 数字 ID 1 = 应用图标；同文件亦打包进 qrc 供窗口图标（main.cpp），
+// 两处同一张 app.ico，保证资源管理器与窗口左上角一致。
+1 ICON "app.ico"

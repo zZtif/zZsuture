@@ -69,7 +69,8 @@ qt_add_executable(SUture
     src/app/discaxisview.hpp
     src/app/timelineview.cpp
     src/app/timelineview.hpp
-    src/app/resources.qrc)
+    src/app/resources.qrc
+    src/app/suture.rc)   # Windows 资源：exe 图标
 target_link_libraries(SUture PRIVATE suture-core Qt6::Widgets)
 
 # GUI 子系统：启动不弹控制台窗口

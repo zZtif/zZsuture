@@ -2,5 +2,6 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>theme.qss</file>
+        <file>app.ico</file>   <!-- 窗口图标（exe 图标走 suture.rc，同一张图） -->
     </qresource>
 </RCC>
