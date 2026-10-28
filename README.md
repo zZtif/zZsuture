@@ -1,4 +1,7 @@
 # SUture
+<img width="640" height="640" alt="2311" src="https://github.com/user-attachments/assets/eced7324-f808-446e-86ec-fbcba5d602dd" />
+
+
 
 BDMV 多集连播字幕合并工具（Windows / C++ / Qt Widgets）。
 
