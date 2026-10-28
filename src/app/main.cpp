@@ -1,4 +1,5 @@
 #include <QFile>
+#include <QIcon>
 #include <QtWidgets/QApplication>
 
 #include "mainwindow.hpp"
@@ -10,6 +11,7 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName(QStringLiteral("SUture"));
     QApplication::setApplicationVersion(QString::fromUtf8(suture::kVersionString));
     QApplication::setOrganizationName(QStringLiteral("SUture"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/app.ico")));
 
     // 暗色主题：QSS 打包在 qrc 中（架构 §5.9）
     QFile qss(QStringLiteral(":/theme.qss"));
