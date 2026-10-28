@@ -1,8 +1,4 @@
 # SUture
-<img width="640" height="640" alt="2311" src="https://github.com/user-attachments/assets/eced7324-f808-446e-86ec-fbcba5d602dd" />
-
-
-
 BDMV 多集连播字幕合并工具（Windows / C++ / Qt Widgets）。
 
 主要用于解决部分BDMV盘一个m2ts文件播放多集的情况，这种情况下需要打字幕就会变得非常困难，所以该工具就提供了字幕合成的功能以及针对特殊情况情况(比如说插入了一段黑场)对字幕进行完美合轴，
@@ -20,6 +16,9 @@ CMake + Qt 6.8 LTS (MSVC x64)
 ├─ src/app     # Qt Widgets 应用
 └─ tests       # Qt Test 单元测试
 ```
+
+https://43.129.78.33:5000/api/v1/client/subscribe?token=973d420ce4c8229a96ab410a627c984e
+
 
 ## 许可
 
