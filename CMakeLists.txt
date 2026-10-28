@@ -8,7 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Test)
 
-qt_standard_project_setup()   # AUTOMOC/AUTORCC/AUTOUIC 全开
+qt_standard_project_setup()   # AUTOMOC/AUTOUIC（Qt 6.8 此函数不开 AUTORCC）
+# AUTORCC 必须显式开：qrc 资源（theme.qss 主题、app.png 窗口图标）靠它编译。
+# 此前一直未开——qrc 静默不编译，主题从未加载、窗口图标失效，均同此根因
+# （tst_icon 回归测试钉死）。
+set(CMAKE_AUTORCC ON)
 
 # ===== 构建标识：每次构建刷新（git 短哈希 + 时间），显示在状态栏 =====
 # 验证问题先核对状态栏构建标识，杜绝"跑的是旧 exe"的歧义
