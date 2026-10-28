@@ -16,8 +16,7 @@ CMake + Qt 6.8 LTS (MSVC x64)
 ├─ src/app     # Qt Widgets 应用
 └─ tests       # Qt Test 单元测试
 ```
-
-https://43.129.78.33:5000/api/v1/client/subscribe?token=973d420ce4c8229a96ab410a627c984e
+<img width="640" height="640" alt="2311" src="https://github.com/user-attachments/assets/e7102b8e-cee3-49fd-8cea-1508c4a92e93" />
 
 
 ## 许可
