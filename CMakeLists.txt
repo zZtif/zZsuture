@@ -53,6 +53,9 @@ add_library(suture-core STATIC
 add_dependencies(suture-core gen_buildinfo)
 target_include_directories(suture-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(suture-core PUBLIC Qt6::Core)
+# 版本号同步守护：注入 project VERSION，version.hpp 里 static_assert 比对
+target_compile_definitions(suture-core PUBLIC
+    SUTURE_CMAKE_VERSION="${PROJECT_VERSION}")
 
 # 测试样例目录（仓库外 ../测试：六组 24 文件，版权原因不入库）
 set(SUTURE_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../测试"
