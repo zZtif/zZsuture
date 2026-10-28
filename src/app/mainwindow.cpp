@@ -55,9 +55,10 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::buildUi()
 {
-    // 构建标识放标题栏（最显眼处）+ 状态栏右侧——验证问题先核对此处
-    setWindowTitle(tr("SUture — BDMV 字幕合并 ｜ 构建 %1")
-                       .arg(QString::fromLatin1(kBuildStamp)));
+    // 标题栏显示版本号；构建标识退到状态栏（发布版仍可凭它核对
+    // "跑的是哪个提交构建的 exe"，报问题用）
+    setWindowTitle(tr("SUture — BDMV 字幕合并 v%1")
+                       .arg(QString::fromUtf8(versionString())));
     resize(1080, 680);
     setMinimumSize(1000, 640);   // A1：下限兜底（时间轴再窄不可用）
     setAcceptDrops(true);
@@ -403,8 +404,9 @@ void MainWindow::refreshStatus()
         }
     }
     statusLabel_->setText(
-        tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4  ｜ 构建 %5")
+        tr("文件 %1 个 ｜ ● 错误 %2  ⚠ 警告 %3  ℹ 提示 %4  ｜ v%5（构建 %6）")
             .arg(session_->count()).arg(err).arg(warn).arg(info)
+            .arg(QString::fromUtf8(versionString()))
             .arg(QString::fromLatin1(kBuildStamp)));
 }
 
