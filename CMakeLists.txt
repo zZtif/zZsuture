@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(SUture VERSION 0.1.0 LANGUAGES CXX)
+project(SUture VERSION 1.0.0 LANGUAGES CXX)
 
 # C++20（架构 D12：MSVC 2022 x64 + Qt 6.8 LTS）
 set(CMAKE_CXX_STANDARD 20)

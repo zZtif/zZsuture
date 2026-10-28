@@ -4,7 +4,7 @@
 
 namespace suture {
 
-inline constexpr char kVersionString[] = "0.1.0";
+inline constexpr char kVersionString[] = "1.0.0";
 
 // 返回版本字符串（供测试与"关于"等界面使用）
 const char* versionString();
