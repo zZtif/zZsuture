@@ -2,6 +2,7 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>theme.qss</file>
-        <file>app.ico</file>   <!-- 窗口图标（exe 图标走 suture.rc，同一张图） -->
+        <file>app.png</file>   <!-- 窗口图标：PNG（QtGui 内建解码，不依赖 qico 插件）；
+                                    exe 文件图标走 suture.rc 的 app.ico，同一张图 -->
     </qresource>
 </RCC>
