@@ -35,6 +35,10 @@ rem 3) Qt 运行库（DLL/插件/中文翻译）
 windeployqt --release --compiler-runtime "%PKG%\SUture.exe"
 if errorlevel 1 exit /b 1
 
+rem windeployqt --compiler-runtime 会拖一个 25MB 的 vc_redist 安装器进包，
+rem 运行库 DLL 已直接拷贝，安装器多余，删掉
+del "%PKG%\vc_redist.x64.exe" >nul 2>&1
+
 rem 4) MSVC 运行库（本机 Redist 版本号变了要改这行）
 set "CRT=D:\Application\Visual studio\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT"
 rem cmd 的 copy 不支持空格分隔多源文件，逐个拷
